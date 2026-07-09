@@ -2,10 +2,14 @@
   "name": "new-project",
   "private": true,
   "scripts": {
-    "dev:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local-apps.ps1"
+    "dev:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local-apps.ps1",
+    "supabase": "supabase"
   },
   "workspaces": [
     "packages/*",
     "apps/*"
-  ]
+  ],
+  "devDependencies": {
+    "supabase": "^2.109.1"
+  }
 }
