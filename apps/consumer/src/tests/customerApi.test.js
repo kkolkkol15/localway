@@ -5,6 +5,8 @@ import {
   buildBookmarkRow,
   buildConversationMessageRow,
   buildSupportTicketRow,
+  buildHomepageTourSections,
+  fetchActiveTours,
   mapTourRecord,
   upsertAccountSettings,
   toggleBookmark
@@ -39,9 +41,90 @@ test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
 
   assert.equal(tour.id, 'tour-1');
   assert.equal(tour.price, 25);
+  assert.equal(tour.image, 'one.png');
   assert.equal(tour.guide.name, 'Mina');
   assert.deepEqual(tour.gallery, ['one.png', 'two.png']);
   assert.deepEqual(tour.options, { pickup: true });
+});
+
+test('buildHomepageTourSections distributes shuffled tours without duplicates when there are enough tours', () => {
+  const sourceTours = Array.from({ length: 6 }, (_, index) => ({ id: `tour-${index + 1}` }));
+  const sections = buildHomepageTourSections(sourceTours, {
+    sectionDefinitions: [
+      { key: 'popular', size: 2 },
+      { key: 'recommended', size: 2 },
+      { key: 'nearby', size: 2 }
+    ],
+    random: () => 0.5
+  });
+
+  const selectedIds = Object.values(sections).flat().map((tour) => tour.id);
+
+  assert.equal(selectedIds.length, 6);
+  assert.equal(new Set(selectedIds).size, 6);
+});
+
+test('buildHomepageTourSections reuses tours only when the approved pool is too small', () => {
+  const sourceTours = [{ id: 'tour-1' }, { id: 'tour-2' }];
+  const sections = buildHomepageTourSections(sourceTours, {
+    sectionDefinitions: [
+      { key: 'popular', size: 4 },
+      { key: 'recommended', size: 4 }
+    ],
+    random: () => 0.5
+  });
+
+  assert.deepEqual(Object.keys(sections), ['popular', 'recommended']);
+  assert.equal(sections.popular.length, 2);
+  assert.equal(sections.recommended.length, 2);
+  assert.equal(new Set(sections.popular.map((tour) => tour.id)).size, 2);
+  assert.equal(new Set(sections.recommended.map((tour) => tour.id)).size, 2);
+  assert.equal(new Set([...sections.popular, ...sections.recommended].map((tour) => tour.id)).size, 2);
+});
+
+test('buildHomepageTourSections keeps every section empty when there are no approved tours', () => {
+  const sections = buildHomepageTourSections([], {
+    sectionDefinitions: [
+      { key: 'popular', size: 4 },
+      { key: 'recommended', size: 4 }
+    ]
+  });
+
+  assert.deepEqual(sections, { popular: [], recommended: [] });
+});
+
+test('fetchActiveTours selects active tours from active guide profiles only', async () => {
+  const calls = [];
+  const query = {
+    select: (columns) => {
+      calls.push(['select', columns]);
+      return query;
+    },
+    eq: (column, value) => {
+      calls.push(['eq', column, value]);
+      return query;
+    },
+    order: async (column, options) => {
+      calls.push(['order', column, options]);
+      return { data: [], error: null };
+    }
+  };
+  const fakeClient = {
+    from: (table) => {
+      calls.push(['from', table]);
+      return query;
+    }
+  };
+
+  await fetchActiveTours(fakeClient);
+
+  assert.deepEqual(calls, [
+    ['from', 'tours'],
+    ['select', '*, guide_profiles!inner(*), tour_images(*)'],
+    ['eq', 'status', 'active'],
+    ['eq', 'guide_profiles.status', 'active'],
+    ['order', 'created_at', { ascending: false }]
+  ]);
 });
 
 test('buildAccountSettingsRow stores account preferences as json fields', () => {

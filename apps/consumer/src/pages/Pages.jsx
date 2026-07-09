@@ -12,7 +12,7 @@ import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js'
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
 import { publishGuideTour } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
-import { createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, upsertAccountSettings } from '../lib/customerApi.js';
+import { buildHomepageTourSections, createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
 
@@ -100,7 +100,8 @@ const nationalityOptions = [
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [remoteTours, setRemoteTours] = useState(tours);
+  const [homepageTourSections, setHomepageTourSections] = useState(() => buildHomepageTourSections([]));
+  const [tourLoadError, setTourLoadError] = useState('');
   const [city, setCity] = useState('');
   const [travelDate, setTravelDate] = useState('');
   const [adults, setAdults] = useState(1);
@@ -114,9 +115,15 @@ export function HomePage() {
       try {
         const client = await createBrowserSupabaseClient();
         const items = await fetchActiveTours(client);
-        if (active && items.length) setRemoteTours(items);
+        if (active) {
+          setHomepageTourSections(buildHomepageTourSections(items));
+          setTourLoadError('');
+        }
       } catch {
-        if (active) setRemoteTours(tours);
+        if (active) {
+          setHomepageTourSections(buildHomepageTourSections([]));
+          setTourLoadError('투어 정보를 불러오지 못했습니다.');
+        }
       }
     }
     loadTours();
@@ -124,11 +131,12 @@ export function HomePage() {
       active = false;
     };
   }, []);
+  // Future: replace random section allocation with popularity, recommendation, location, and availability ranking.
   const tourSections = [
-    { title: t('home.popular'), items: remoteTours, duration: '42s' },
-    { title: 'Recommended tours', items: [...remoteTours.slice(1), remoteTours[0]].filter(Boolean), duration: '44s' },
-    { title: 'nearby tours', items: [...remoteTours.slice(2), ...remoteTours.slice(0, 2)], duration: '46s' },
-    { title: 'tours available this week', items: [...remoteTours.slice(3), ...remoteTours.slice(0, 3)], duration: '48s' }
+    { title: t('home.popular'), items: homepageTourSections.popular ?? [], duration: '42s' },
+    { title: 'Recommended tours', items: homepageTourSections.recommended ?? [], duration: '44s' },
+    { title: 'nearby tours', items: homepageTourSections.nearby ?? [], duration: '46s' },
+    { title: 'tours available this week', items: homepageTourSections.week ?? [], duration: '48s' }
   ];
 
   return (
@@ -195,6 +203,7 @@ export function HomePage() {
             tours={section.items}
             duration={section.duration}
             className={index > 0 ? 'mt-12' : ''}
+            error={tourLoadError}
             onTourClick={(tourId) => navigate(`/tour/${tourId}`)}
           />
         ))}
@@ -203,19 +212,25 @@ export function HomePage() {
   );
 }
 
-function TourCarouselSection({ title, tours: sectionTours, duration, className = '', onTourClick }) {
+function TourCarouselSection({ title, tours: sectionTours, duration, className = '', error = '', onTourClick }) {
   return (
     <section className={className}>
       <h2 className="mb-5 text-3xl font-black">{title}</h2>
-      <div className="popular-carousel" style={{ '--carousel-duration': duration }} aria-label={title}>
-        <div className="popular-carousel-track">
-          {[...sectionTours, ...sectionTours].map((tour, index) => (
-            <div className="popular-tour-slide" key={`${title}-${tour.id}-${index}`} aria-hidden={index >= sectionTours.length}>
-              <TourCard tour={tour} onClick={() => onTourClick(tour.id)} />
-            </div>
-          ))}
+      {!sectionTours.length ? (
+        <div className="rounded-card bg-white p-8 text-center text-sm font-semibold text-zinc-500 shadow-soft">
+          {error || '아직 등록된 투어가 없습니다.'}
         </div>
-      </div>
+      ) : (
+        <div className="popular-carousel" style={{ '--carousel-duration': duration }} aria-label={title}>
+          <div className="popular-carousel-track">
+            {[...sectionTours, ...sectionTours].map((tour, index) => (
+              <div className="popular-tour-slide" key={`${title}-${tour.id}-${index}`} aria-hidden={index >= sectionTours.length}>
+                <TourCard tour={tour} onClick={() => onTourClick(tour.id)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

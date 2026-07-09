@@ -7,6 +7,13 @@ function throwIfError(error) {
   if (error) throw error;
 }
 
+export const homepageTourSectionDefinitions = [
+  { key: 'popular', size: 4 },
+  { key: 'recommended', size: 4 },
+  { key: 'nearby', size: 4 },
+  { key: 'week', size: 4 }
+];
+
 export function mapGuideRecord(profile = {}) {
   return {
     id: profile.id,
@@ -36,6 +43,7 @@ export function mapTourRecord(record = {}) {
     durationMinutes: Number(record.duration_minutes ?? 0),
     maxPeople: Number(record.max_people ?? 1),
     status: record.status,
+    image: images[0]?.image_path || guide.avatar || '',
     thumbnail: images[0]?.image_path || guide.avatar || '',
     gallery: images.map((image) => image.image_path),
     options: record.options ?? {},
@@ -45,6 +53,45 @@ export function mapTourRecord(record = {}) {
     reviews: guide.reviews,
     reviewsList: record.reviews ?? []
   };
+}
+
+function shuffleTours(tours, random) {
+  const shuffled = [...tours];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+export function buildHomepageTourSections(tours = [], {
+  sectionDefinitions = homepageTourSectionDefinitions,
+  random = Math.random
+} = {}) {
+  const approvedTours = tours.filter(Boolean);
+  const sections = Object.fromEntries(sectionDefinitions.map((section) => [section.key, []]));
+  if (!approvedTours.length) return sections;
+
+  const shuffledTours = shuffleTours(approvedTours, random);
+  const requestedCount = sectionDefinitions.reduce((total, section) => total + section.size, 0);
+
+  if (shuffledTours.length >= requestedCount) {
+    let cursor = 0;
+    sectionDefinitions.forEach((section) => {
+      sections[section.key] = shuffledTours.slice(cursor, cursor + section.size);
+      cursor += section.size;
+    });
+    return sections;
+  }
+
+  let cursor = 0;
+  sectionDefinitions.forEach((section) => {
+    const sectionSize = Math.min(section.size, shuffledTours.length);
+    const rotatedTours = [...shuffledTours.slice(cursor % shuffledTours.length), ...shuffledTours.slice(0, cursor % shuffledTours.length)];
+    sections[section.key] = rotatedTours.slice(0, sectionSize);
+    cursor += sectionSize;
+  });
+  return sections;
 }
 
 export function buildAccountSettingsRow({ profileId, settings = {} }) {
@@ -86,8 +133,9 @@ export function buildConversationMessageRow({ conversationId, senderId, body }) 
 export async function fetchActiveTours(client, { city = '', filters = {} } = {}) {
   let query = client
     .from('tours')
-    .select('*, guide_profiles(*), tour_images(*)')
-    .eq('status', 'active');
+    .select('*, guide_profiles!inner(*), tour_images(*)')
+    .eq('status', 'active')
+    .eq('guide_profiles.status', 'active');
   if (city) query = query.ilike('city', city);
   if (filters.type) query = query.eq('type', filters.type);
   const { data, error } = await query.order('created_at', { ascending: false });

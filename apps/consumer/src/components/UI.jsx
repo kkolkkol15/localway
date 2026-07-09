@@ -15,18 +15,32 @@ export function Modal({ title, children, onClose }) {
 }
 
 export function TourCard({ tour, onClick, saved, onSave }) {
+  const imageSrc = tour.image || tour.thumbnail || '';
+  const avatarSrc = tour.guide?.avatar || '';
+  const ratingLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `⭐ ${tour.rating}` : '신규';
+
   return (
     <article className="group min-w-[280px] overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
       <button className="block w-full text-left" onClick={onClick}>
-        <img className="h-56 w-full object-cover" src={tour.image} alt="" loading="lazy" />
+        {imageSrc ? (
+          <img className="h-56 w-full object-cover" src={imageSrc} alt="" loading="lazy" />
+        ) : (
+          <div className="grid h-56 w-full place-items-center bg-zinc-100 text-sm font-bold text-zinc-400">No image</div>
+        )}
         <div className="grid gap-2 p-4">
           <div className="flex items-center gap-2">
-            <img className="h-8 w-8 rounded-full object-cover" src={tour.guide.avatar} alt="" />
-            <span className="text-sm font-bold">{tour.guide.name}</span>
+            {avatarSrc ? (
+              <img className="h-8 w-8 rounded-full object-cover" src={avatarSrc} alt="" />
+            ) : (
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-white text-xs font-black text-zinc-500">
+                {(tour.guide?.name || 'L').slice(0, 1)}
+              </span>
+            )}
+            <span className="text-sm font-bold">{tour.guide?.name || 'Local guide'}</span>
           </div>
           <h3 className="line-clamp-2 text-lg font-black">{tour.title}</h3>
           <p className="line-clamp-2 text-sm text-zinc-600">{tour.description}</p>
-          <div className="flex items-center justify-between font-bold"><span>⭐ {tour.rating}</span><span className="text-primary">${tour.price}</span></div>
+          <div className="flex items-center justify-between font-bold"><span>{ratingLabel}</span><span className="text-primary">${tour.price}</span></div>
         </div>
       </button>
       {onSave && <button className="mx-4 mb-4 h-11 rounded-full border px-4 font-bold" onClick={onSave}>{saved ? '♥ Saved' : '♡ Save'}</button>}
