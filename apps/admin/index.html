@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Way Admin</title>
+    <script>
+      if (window.location.protocol === 'file:' && !window.location.pathname.replaceAll('\\', '/').endsWith('/dist/index.html')) {
+        const devUrl = 'http://127.0.0.1:5173/admin';
+        const fallbackUrl = new URL('./dist/index.html', window.location.href).href;
+        fetch(devUrl, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => window.location.replace(devUrl))
+          .catch(() => window.location.replace(fallbackUrl));
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p>Open the built admin app at <a href="./dist/index.html">dist/index.html</a>.</p>
+    </noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

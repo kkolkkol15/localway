@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>local way</title>
+  </head>
+  <body>
+    <div id="root">
+      <div style="min-height:100vh;display:grid;place-items:center;background:#fffff5;font-family:system-ui,sans-serif;color:#27272a;text-align:center;padding:24px;">
+        <div>
+          <h1 style="margin:0 0 12px;color:#ea5c2a;">[local way]</h1>
+          <p style="margin:0;font-weight:700;">앱을 여는 중입니다.</p>
+          <p style="margin:8px 0 0;color:#71717a;">잠시 후에도 화면이 바뀌지 않으면 dist/index.html을 열어주세요.</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      if (location.protocol === 'file:' && !location.pathname.replaceAll('\\', '/').includes('/dist/')) {
+        const devUrl = 'http://127.0.0.1:5174/';
+        const fallbackUrl = new URL('./dist/index.html', location.href).href;
+        fetch(devUrl, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => location.replace(devUrl))
+          .catch(() => location.replace(fallbackUrl));
+      }
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
