@@ -49,7 +49,7 @@ test('maps Supabase invalid credentials to a readable admin login message', () =
   assert.match(message, /profiles.role/);
 });
 
-test('normalizes pending guide application related records', () => {
+test('normalizes guide application related records across statuses', () => {
   const normalized = normalizePendingGuideData({
     applications: [
       { id: '00000000-0000-4000-8000-000000000001', user_id: '10000000-0000-4000-8000-000000000001', status: 'pending' },
@@ -59,7 +59,10 @@ test('normalizes pending guide application related records', () => {
     tourDrafts: [{ id: '40000000-0000-4000-8000-000000000001', guide_id: '20000000-0000-4000-8000-000000000001', title: 'Draft' }]
   });
 
-  assert.deepEqual(normalized.applications.map((item) => item.id), ['00000000-0000-4000-8000-000000000001']);
+  assert.deepEqual(normalized.applications.map((item) => item.id), [
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000002'
+  ]);
   assert.equal(normalized.guideProfilesByUserId['10000000-0000-4000-8000-000000000001'].id, '20000000-0000-4000-8000-000000000001');
   assert.equal(normalized.tourDraftsByGuideId['20000000-0000-4000-8000-000000000001'][0].title, 'Draft');
 });

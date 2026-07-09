@@ -181,7 +181,7 @@ export function normalizePendingGuideData({ applications = [], guideProfiles = [
   const guideProfilesById = indexBy(guideProfiles, 'id');
 
   return {
-    applications: applications.filter((application) => application.status === 'pending'),
+    applications,
     guideProfilesByUserId,
     guideProfilesById,
     tourDraftsByGuideId: groupBy(tourDrafts, 'guide_id')
@@ -194,7 +194,7 @@ export async function fetchPendingGuideApplications(client = createSupabaseRestC
   }
 
   const applications = await client.request('guide_applications', {
-    query: '?select=*&status=eq.pending&order=submitted_at.desc'
+    query: '?select=*&order=submitted_at.desc'
   });
   const userIds = [...new Set(applications.map((application) => application.user_id).filter(Boolean))];
   if (!userIds.length) return normalizePendingGuideData({ applications });

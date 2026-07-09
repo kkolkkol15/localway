@@ -75,7 +75,7 @@ export function DashboardHome() {
 
 export function GuideApproval() {
   const { state, dispatch } = useAdmin();
-  const [filter, setFilter] = useState('pending');
+  const [filter, setFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [rejecting, setRejecting] = useState(null);
   const config = getSupabaseAdminConfig();
@@ -127,7 +127,7 @@ export function GuideApproval() {
         { key: 'native_language', label: '모국어', sortable: true },
         { key: 'additional_languages', label: '추가 언어', sortable: true, render: (row) => fieldValue(row.additional_languages) },
         { key: 'status', label: '상태', sortable: true, render: (row) => <StatusBadge value={row.status} /> },
-        { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Check} tone="primary" onClick={() => approve(row)}>승인</ActionButton><ActionButton icon={Ban} onClick={() => setRejecting(row)}>거절</ActionButton></div> }
+        { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>{row.status === 'pending' && <><ActionButton icon={Check} tone="primary" onClick={() => approve(row)}>승인</ActionButton><ActionButton icon={Ban} onClick={() => setRejecting(row)}>거절</ActionButton></>}</div> }
       ]} />
       {selected && <GuideApplicationDetail application={selected} client={client} state={state} onClose={() => setSelected(null)} />}
       {rejecting && <ReasonModal title="가이드 신청 거절" onClose={() => setRejecting(null)} onSubmit={(reason) => reject(rejecting, reason)} />}
