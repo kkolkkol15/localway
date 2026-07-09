@@ -23,6 +23,14 @@ test('reads Supabase admin config from existing environment keys', () => {
   assert.equal(config.adminEmail, 'admin@local-way.local');
 });
 
+test('falls back to public Supabase config for deployed builds without Vite env', () => {
+  const config = getSupabaseAdminConfig({});
+
+  assert.equal(config.isConfigured, true);
+  assert.equal(config.url, 'https://qrabzkcibqaslealvdar.supabase.co');
+  assert.equal(config.publishableKey, 'sb_publishable_QYusbitKD__5tfmQSLzNbg_Tb3wrVMa');
+});
+
 test('resolves admin login alias without storing a password in the app', () => {
   assert.equal(
     resolveAdminLoginEmail('admin', { adminAlias: 'admin', adminEmail: 'admin@local-way.local' }),

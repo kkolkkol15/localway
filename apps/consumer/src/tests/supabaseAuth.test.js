@@ -12,11 +12,11 @@ import {
   signUpWithEmail
 } from '../lib/supabaseAuth.js';
 
-test('getSupabaseConfig reports missing browser environment values', () => {
+test('getSupabaseConfig falls back to public deployment values without Vite env', () => {
   assert.deepEqual(getSupabaseConfig({}), {
-    url: '',
-    publishableKey: '',
-    isConfigured: false
+    url: 'https://qrabzkcibqaslealvdar.supabase.co',
+    publishableKey: 'sb_publishable_QYusbitKD__5tfmQSLzNbg_Tb3wrVMa',
+    isConfigured: true
   });
 });
 

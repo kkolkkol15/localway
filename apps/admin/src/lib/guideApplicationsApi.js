@@ -6,6 +6,11 @@ const supabaseEnvKeys = {
   adminEmail: ['VITE_ADMIN_LOGIN_EMAIL']
 };
 
+const defaultSupabaseConfig = {
+  url: 'https://qrabzkcibqaslealvdar.supabase.co',
+  publishableKey: 'sb_publishable_QYusbitKD__5tfmQSLzNbg_Tb3wrVMa'
+};
+
 function readEnv(env, keys) {
   return keys.map((key) => env?.[key]).find(Boolean) || '';
 }
@@ -35,8 +40,8 @@ function groupBy(items, key) {
 }
 
 export function getSupabaseAdminConfig(env = getImportEnv()) {
-  const url = readEnv(env, supabaseEnvKeys.url);
-  const publishableKey = readEnv(env, supabaseEnvKeys.key);
+  const url = readEnv(env, supabaseEnvKeys.url) || defaultSupabaseConfig.url;
+  const publishableKey = readEnv(env, supabaseEnvKeys.key) || defaultSupabaseConfig.publishableKey;
   const accessToken = readEnv(env, supabaseEnvKeys.accessToken);
   const adminAlias = readEnv(env, supabaseEnvKeys.adminAlias) || 'admin';
   const adminEmail = readEnv(env, supabaseEnvKeys.adminEmail) || 'admin@local-way.local';

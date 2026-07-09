@@ -1,8 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
+const defaultSupabaseConfig = {
+  url: 'https://qrabzkcibqaslealvdar.supabase.co',
+  publishableKey: 'sb_publishable_QYusbitKD__5tfmQSLzNbg_Tb3wrVMa'
+};
+
 export function getSupabaseConfig(env = import.meta.env) {
-  const url = env.VITE_SUPABASE_URL ?? '';
-  const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '';
+  const url = env.VITE_SUPABASE_URL ?? defaultSupabaseConfig.url;
+  const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY ?? defaultSupabaseConfig.publishableKey;
   return { url, publishableKey, isConfigured: Boolean(url && publishableKey) };
 }
 
