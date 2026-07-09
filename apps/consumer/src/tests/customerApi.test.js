@@ -1,0 +1,143 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildAccountSettingsRow,
+  buildBookmarkRow,
+  buildConversationMessageRow,
+  buildSupportTicketRow,
+  mapTourRecord,
+  upsertAccountSettings,
+  toggleBookmark
+} from '../lib/customerApi.js';
+
+test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
+  const tour = mapTourRecord({
+    id: 'tour-1',
+    title: 'Market walk',
+    city: 'Seoul',
+    type: 'Food',
+    description: 'Local food',
+    price_amount: 25,
+    currency: 'USD',
+    payment_type: 'pay_as_you_go',
+    duration_minutes: 120,
+    max_people: 4,
+    status: 'active',
+    content_html: '<p>Hello</p>',
+    options: { pickup: true },
+    guide_profiles: {
+      id: 'guide-1',
+      display_name: 'Mina',
+      city: 'Seoul',
+      languages: ['Korean', 'English'],
+      rating_avg: 4.8,
+      review_count: 12,
+      profile_image_path: 'profile.png'
+    },
+    tour_images: [{ image_path: 'one.png', sort_order: 0 }, { image_path: 'two.png', sort_order: 1 }]
+  });
+
+  assert.equal(tour.id, 'tour-1');
+  assert.equal(tour.price, 25);
+  assert.equal(tour.guide.name, 'Mina');
+  assert.deepEqual(tour.gallery, ['one.png', 'two.png']);
+  assert.deepEqual(tour.options, { pickup: true });
+});
+
+test('buildAccountSettingsRow stores account preferences as json fields', () => {
+  assert.deepEqual(buildAccountSettingsRow({
+    profileId: 'user-1',
+    settings: {
+      preferences: { language: 'ko' },
+      notifications: { messageEmail: true },
+      privacy: { profileVisibility: 'public' },
+      security: { loginAlerts: true }
+    }
+  }), {
+    profile_id: 'user-1',
+    preferences: { language: 'ko' },
+    notifications: { messageEmail: true },
+    privacy: { profileVisibility: 'public' },
+    security: { loginAlerts: true }
+  });
+});
+
+test('buildBookmarkRow maps a saved tour to the join table', () => {
+  assert.deepEqual(buildBookmarkRow({ profileId: 'user-1', tourId: 'tour-1' }), {
+    profile_id: 'user-1',
+    tour_id: 'tour-1'
+  });
+});
+
+test('buildSupportTicketRow validates required ticket input', () => {
+  assert.deepEqual(buildSupportTicketRow({
+    profileId: 'user-1',
+    payload: { subject: 'Need help', description: 'Question' }
+  }), {
+    author_id: 'user-1',
+    subject: 'Need help',
+    description: 'Question',
+    status: 'open'
+  });
+
+  assert.throws(() => buildSupportTicketRow({ profileId: 'user-1', payload: { subject: '', description: '' } }), /subject and description/i);
+});
+
+test('buildConversationMessageRow maps message composer input', () => {
+  assert.deepEqual(buildConversationMessageRow({
+    conversationId: 'conv-1',
+    senderId: 'user-1',
+    body: 'Hello'
+  }), {
+    conversation_id: 'conv-1',
+    sender_id: 'user-1',
+    body: 'Hello'
+  });
+});
+
+test('upsertAccountSettings writes one row per profile', async () => {
+  const calls = [];
+  const fakeClient = {
+    from: (table) => ({
+      upsert: (row, options) => {
+        calls.push([table, row, options]);
+        return { select: () => ({ single: async () => ({ data: row, error: null }) }) };
+      }
+    })
+  };
+
+  const result = await upsertAccountSettings(fakeClient, {
+    profileId: 'user-1',
+    settings: { preferences: { language: 'en' } }
+  });
+
+  assert.equal(result.profile_id, 'user-1');
+  assert.equal(calls[0][0], 'account_settings');
+  assert.deepEqual(calls[0][2], { onConflict: 'profile_id' });
+});
+
+test('toggleBookmark deletes existing saved tour or inserts a new one', async () => {
+  const calls = [];
+  const fakeClient = {
+    from: (table) => ({
+      delete: () => ({
+        eq: (column, value) => {
+          calls.push(['delete-eq', table, column, value]);
+          return { eq: async (secondColumn, secondValue) => {
+            calls.push(['delete-eq', table, secondColumn, secondValue]);
+            return { error: null };
+          } };
+        }
+      }),
+      insert: async (row) => {
+        calls.push(['insert', table, row]);
+        return { error: null };
+      }
+    })
+  };
+
+  await toggleBookmark(fakeClient, { profileId: 'user-1', tourId: 'tour-1', currentlySaved: true });
+  await toggleBookmark(fakeClient, { profileId: 'user-1', tourId: 'tour-2', currentlySaved: false });
+
+  assert.deepEqual(calls.at(-1), ['insert', 'bookmarks', { profile_id: 'user-1', tour_id: 'tour-2' }]);
+});

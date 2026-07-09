@@ -12,6 +12,7 @@ import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js'
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
 import { publishGuideTour } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
+import { createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
 
@@ -99,6 +100,7 @@ const nationalityOptions = [
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [remoteTours, setRemoteTours] = useState(tours);
   const [city, setCity] = useState('');
   const [travelDate, setTravelDate] = useState('');
   const [adults, setAdults] = useState(1);
@@ -106,11 +108,27 @@ export function HomePage() {
   const [infants, setInfants] = useState(0);
   const [guestOpen, setGuestOpen] = useState(false);
   const guestCount = adults + children + infants;
+  useEffect(() => {
+    let active = true;
+    async function loadTours() {
+      try {
+        const client = await createBrowserSupabaseClient();
+        const items = await fetchActiveTours(client);
+        if (active && items.length) setRemoteTours(items);
+      } catch {
+        if (active) setRemoteTours(tours);
+      }
+    }
+    loadTours();
+    return () => {
+      active = false;
+    };
+  }, []);
   const tourSections = [
-    { title: t('home.popular'), items: tours, duration: '42s' },
-    { title: 'Recommended tours', items: [...tours.slice(1), tours[0]], duration: '44s' },
-    { title: 'nearby tours', items: [...tours.slice(2), ...tours.slice(0, 2)], duration: '46s' },
-    { title: 'tours available this week', items: [...tours.slice(3), ...tours.slice(0, 3)], duration: '48s' }
+    { title: t('home.popular'), items: remoteTours, duration: '42s' },
+    { title: 'Recommended tours', items: [...remoteTours.slice(1), remoteTours[0]].filter(Boolean), duration: '44s' },
+    { title: 'nearby tours', items: [...remoteTours.slice(2), ...remoteTours.slice(0, 2)], duration: '46s' },
+    { title: 'tours available this week', items: [...remoteTours.slice(3), ...remoteTours.slice(0, 3)], duration: '48s' }
   ];
 
   return (
@@ -238,21 +256,39 @@ export function SearchPage() {
   const [params] = useSearchParams();
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState('recommended');
+  const [searchTours, setSearchTours] = useState(tours);
   const [filters, setFilters] = useState({ types: [], languages: [], priceMin: 0, priceMax: 500, years: 3, toggles: {}, transport: [] });
   const city = params.get('city') || '';
   const adults = params.get('adults') || '1';
 
+  useEffect(() => {
+    let active = true;
+    async function loadTours() {
+      try {
+        const client = await createBrowserSupabaseClient();
+        const items = await fetchActiveTours(client, { city });
+        if (active) setSearchTours(items.length ? items : []);
+      } catch {
+        if (active) setSearchTours(tours);
+      }
+    }
+    loadTours();
+    return () => {
+      active = false;
+    };
+  }, [city]);
+
   const results = useMemo(() => {
-    let list = city ? tours.filter((tour) => tour.city.toLowerCase() === city.toLowerCase()) : tours;
+    let list = city ? searchTours.filter((tour) => tour.city.toLowerCase() === city.toLowerCase()) : searchTours;
     if (filters.types.length) list = list.filter((tour) => filters.types.includes(tour.type));
     list = list.filter((tour) => tour.price >= filters.priceMin && tour.price <= filters.priceMax && tour.guide.years >= filters.years);
     if (filters.languages.length) list = list.filter((tour) => filters.languages.some((lang) => tour.guide.languages.includes(lang)));
-    Object.entries(filters.toggles).forEach(([key, on]) => { if (on) list = list.filter((tour) => tour.options[key]); });
-    if (filters.transport.length) list = list.filter((tour) => filters.transport.some((item) => tour.transport.includes(item)));
+    Object.entries(filters.toggles).forEach(([key, on]) => { if (on) list = list.filter((tour) => tour.options?.[key]); });
+    if (filters.transport.length) list = list.filter((tour) => filters.transport.some((item) => (tour.transport ?? []).includes(item)));
     if (sort === 'rated') list = [...list].sort((a, b) => b.rating - a.rating);
     if (sort === 'price') list = [...list].sort((a, b) => a.price - b.price);
     return list;
-  }, [city, filters, sort]);
+  }, [city, filters, searchTours, sort]);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
@@ -295,14 +331,46 @@ export function TourDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { state, dispatch } = useAppState();
-  const tour = tours.find((item) => item.id === id) ?? tours[0];
+  const [remoteTour, setRemoteTour] = useState(null);
+  const tour = remoteTour ?? tours.find((item) => item.id === id) ?? tours[0];
   const [date, setDate] = useState(today);
   const [time, setTime] = useState('10:00');
   const saved = state.bookmarks.includes(tour.id);
 
+  useEffect(() => {
+    let active = true;
+    async function loadTour() {
+      try {
+        const client = await createBrowserSupabaseClient();
+        const item = await fetchTourById(client, id);
+        if (active) setRemoteTour(item);
+      } catch {
+        if (active) setRemoteTour(null);
+      }
+    }
+    if (id) loadTour();
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
   function reserve() {
     if (!state.auth.isAuthenticated) navigate(`/login?redirect=${encodeURIComponent(`/tour/${tour.id}`)}`);
     else navigate(`/payment?tourId=${tour.id}&date=${date}&time=${time}`);
+  }
+
+  async function toggleSavedTour() {
+    if (!state.auth.isAuthenticated) {
+      navigate(`/login?redirect=/tour/${tour.id}`);
+      return;
+    }
+    try {
+      const client = await createBrowserSupabaseClient();
+      await toggleBookmark(client, { profileId: state.auth.user?.id, tourId: tour.id, currentlySaved: saved });
+    } catch {
+      // Keep the local bookmark behavior as a fallback if the backend call fails.
+    }
+    dispatch({ type: 'TOGGLE_BOOKMARK', payload: { tourId: tour.id } });
   }
 
   return (
@@ -310,7 +378,7 @@ export function TourDetailPage() {
       <div className="grid gap-3 overflow-hidden rounded-card md:grid-cols-3">{tour.gallery.map((src) => <img className="h-72 w-full object-cover" src={src} alt="" loading="lazy" key={src} />)}</div>
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
         <section>
-          <div className="flex items-start justify-between gap-3"><div><h1 className="text-4xl font-black">{tour.title}</h1><p className="mt-2 text-zinc-600">{tour.description}</p></div><button className="icon-btn bg-white" onClick={() => state.auth.isAuthenticated ? dispatch({ type: 'TOGGLE_BOOKMARK', payload: { tourId: tour.id } }) : navigate(`/login?redirect=/tour/${tour.id}`)}><Heart className={saved ? 'fill-primary text-primary' : ''} /></button></div>
+          <div className="flex items-start justify-between gap-3"><div><h1 className="text-4xl font-black">{tour.title}</h1><p className="mt-2 text-zinc-600">{tour.description}</p></div><button className="icon-btn bg-white" onClick={toggleSavedTour}><Heart className={saved ? 'fill-primary text-primary' : ''} /></button></div>
           <div className="mt-6 flex items-center gap-4 rounded-card bg-white p-4 shadow-soft"><img className="h-16 w-16 rounded-full object-cover" src={tour.guide.avatar} alt="" /><div><b>{tour.guide.name}</b><p className="text-sm text-zinc-600">{tour.guide.years} years in {tour.guide.city} · {tour.guide.languages.join(', ')}</p></div></div>
           <div className="mt-6 grid gap-3 sm:grid-cols-3">{Object.entries(tour.options).map(([key, value]) => <div className="rounded-card bg-white p-4 shadow-soft" key={key}><Check className={value ? 'text-primary' : 'text-zinc-300'} /><b>{optionLabels[key]}</b></div>)}</div>
           <Reviews tour={tour} />
@@ -910,11 +978,49 @@ export function AccountSettingsPage() {
     setActiveSection(requestedSection);
     setIsEditing(requestedEdit);
   }, [requestedSection, requestedEdit]);
+  useEffect(() => {
+    let active = true;
+    async function loadAccountSettings() {
+      if (!state.auth.user?.id || !getSupabaseConfig().isConfigured) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const row = await fetchAccountSettings(client, state.auth.user.id);
+        if (active && row) {
+          dispatch({
+            type: 'UPDATE_ACCOUNT_SETTINGS',
+            payload: {
+              preferences: row.preferences,
+              notifications: row.notifications,
+              privacy: row.privacy,
+              security: row.security
+            }
+          });
+        }
+      } catch {
+        // Local settings remain available if account settings have not been created yet.
+      }
+    }
+    loadAccountSettings();
+    return () => {
+      active = false;
+    };
+  }, [dispatch, state.auth.user?.id]);
   const openSettingsSection = (section, editing = false) => {
     setSearchParams(editing ? { section, edit: '1' } : { section });
   };
   const saveAccountSettings = (payload, message = '설정이 저장됐습니다.') => {
     dispatch({ type: 'UPDATE_ACCOUNT_SETTINGS', payload });
+    if (state.auth.user?.id && getSupabaseConfig().isConfigured) {
+      createBrowserSupabaseClient()
+        .then((client) => upsertAccountSettings(client, {
+          profileId: state.auth.user.id,
+          settings: {
+            ...(state.accountSettings ?? {}),
+            ...payload
+          }
+        }))
+        .catch(() => {});
+    }
     setProfileNotice(message);
   };
   const saveNotificationSettings = (event) => {
@@ -978,7 +1084,7 @@ export function AccountSettingsPage() {
       return;
     }
     try {
-      const name = buildSignupDisplayName({ firstName, lastName });
+      const name = buildSignupDisplayName(firstName, lastName);
       const authUpdates = {};
       if (email && email !== state.auth.user.email) authUpdates.email = email;
       if (password) authUpdates.password = password;
@@ -2031,20 +2137,42 @@ function ProfileAvatar({ src, className = 'h-12 w-12' }) {
 
 export function BookmarksPage() {
   const { state } = useAppState();
-  const saved = tours.filter((tour) => state.bookmarks.includes(tour.id));
+  const [remoteBookmarks, setRemoteBookmarks] = useState([]);
+  const saved = remoteBookmarks.length ? remoteBookmarks : tours.filter((tour) => state.bookmarks.includes(tour.id));
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    async function loadBookmarks() {
+      if (!state.auth.user?.id) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const rows = await fetchBookmarks(client, state.auth.user.id);
+        if (active) setRemoteBookmarks(rows.map((row) => row.tour).filter(Boolean));
+      } catch {
+        if (active) setRemoteBookmarks([]);
+      }
+    }
+    loadBookmarks();
+    return () => {
+      active = false;
+    };
+  }, [state.auth.user?.id]);
+
   return <main className="mx-auto max-w-7xl px-4 py-8"><h1 className="text-3xl font-black">Bookmarks</h1>{saved.length ? <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{saved.map((tour) => <TourCard key={tour.id} tour={tour} onClick={() => navigate(`/tour/${tour.id}`)} />)}</div> : <p className="mt-5 rounded-card bg-white p-8 text-center shadow-soft">No saved tours yet. Save your favorites!</p>}</main>;
 }
 
 export function MessagesPage() {
   const { state, dispatch } = useAppState();
   const [activeCategory, setActiveCategory] = useState('all');
+  const [remoteConversations, setRemoteConversations] = useState([]);
   const allConversations = useMemo(
     () => [
+      ...remoteConversations,
       ...state.conversations.map((conversation) => ({ ...conversation, type: conversation.type ?? 'travel' })),
       ...mockConversations
     ],
-    [state.conversations]
+    [remoteConversations, state.conversations]
   );
   const filteredConversations = activeCategory === 'all' ? allConversations : allConversations.filter((conversation) => conversation.type === activeCategory);
   const [selected, setSelected] = useState(filteredConversations[0]);
@@ -2056,10 +2184,48 @@ export function MessagesPage() {
     }
   }, [activeCategory, filteredConversations, selected?.id]);
 
-  const sendMessage = () => {
+  useEffect(() => {
+    let active = true;
+    async function loadConversations() {
+      if (!state.auth.user?.id || !getSupabaseConfig().isConfigured) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const rows = await fetchConversations(client, state.auth.user.id);
+        const mapped = rows.map((conversation) => ({
+          id: conversation.id,
+          type: conversation.type ?? 'travel',
+          guideName: conversation.title || conversation.last_message || 'Conversation',
+          avatar: '',
+          lastMessage: conversation.last_message || '',
+          messages: [...(conversation.conversation_messages ?? [])]
+            .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+            .map((message) => ({ from: message.sender_id === state.auth.user.id ? 'me' : 'them', text: message.body }))
+        }));
+        if (active) setRemoteConversations(mapped);
+      } catch {
+        if (active) setRemoteConversations([]);
+      }
+    }
+    loadConversations();
+    return () => {
+      active = false;
+    };
+  }, [state.auth.user?.id]);
+
+  const sendMessage = async () => {
     if (!text.trim() || !selected) return;
+    try {
+      if (getSupabaseConfig().isConfigured && !selected.id.startsWith('mock-') && state.auth.user?.id) {
+        await sendConversationMessage(await createBrowserSupabaseClient(), {
+          conversationId: selected.id,
+          senderId: state.auth.user.id,
+          body: text
+        });
+      }
+    } catch {}
     dispatch({ type: 'SEND_MESSAGE', payload: { conversationId: selected.id, text } });
     setSelected((conversation) => conversation ? { ...conversation, lastMessage: text, messages: [...conversation.messages, { from: 'me', text }] } : conversation);
+    setRemoteConversations((items) => items.map((conversation) => conversation.id === selected.id ? { ...conversation, lastMessage: text, messages: [...conversation.messages, { from: 'me', text }] } : conversation));
     setText('');
   };
 
@@ -2139,5 +2305,26 @@ export function PoliciesPage() {
 
 export function SupportPage() {
   const { state, dispatch } = useAppState();
-  return <main className="mx-auto max-w-5xl px-4 py-8"><h1 className="text-3xl font-black">Customer Support</h1><section className="mt-5 grid gap-4">{faqs.map((faq) => <details className="rounded-card bg-white p-4 shadow-soft" key={faq.q}><summary className="font-black">{faq.q}</summary><p className="mt-2 text-zinc-600">{faq.a}</p></details>)}</section><form className="mt-6 grid gap-3 rounded-card bg-white p-5 shadow-soft" onSubmit={(e) => { e.preventDefault(); dispatch({ type: 'SUBMIT_SUPPORT', payload: Object.fromEntries(new FormData(e.currentTarget)) }); e.currentTarget.reset(); }}><h2 className="text-xl font-black">Submit a request</h2><input name="subject" placeholder="Subject" required /><textarea name="description" placeholder="Description" required /><label className="grid min-h-28 place-items-center rounded-card border-2 border-dashed"><Camera /> Optional screenshot upload</label><button className="h-12 rounded-full bg-primary font-black text-white">Submit</button></form><section className="mt-6 rounded-card bg-white p-5 shadow-soft"><h2 className="text-xl font-black">My inquiries</h2>{state.inquiries.length ? state.inquiries.map((item) => <p key={item.id}>{item.subject} · {item.status}</p>) : <p>No inquiries yet</p>}</section></main>;
+  const [remoteInquiries, setRemoteInquiries] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadTickets() {
+      if (!state.auth.user?.id || !getSupabaseConfig().isConfigured) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const rows = await fetchSupportTickets(client, state.auth.user.id);
+        if (active) setRemoteInquiries(rows);
+      } catch {
+        if (active) setRemoteInquiries([]);
+      }
+    }
+    loadTickets();
+    return () => {
+      active = false;
+    };
+  }, [state.auth.user?.id]);
+
+  const inquiries = remoteInquiries.length ? remoteInquiries : state.inquiries;
+  return <main className="mx-auto max-w-5xl px-4 py-8"><h1 className="text-3xl font-black">Customer Support</h1><section className="mt-5 grid gap-4">{faqs.map((faq) => <details className="rounded-card bg-white p-4 shadow-soft" key={faq.q}><summary className="font-black">{faq.q}</summary><p className="mt-2 text-zinc-600">{faq.a}</p></details>)}</section><form className="mt-6 grid gap-3 rounded-card bg-white p-5 shadow-soft" onSubmit={async (e) => { e.preventDefault(); const payload = Object.fromEntries(new FormData(e.currentTarget)); try { if (getSupabaseConfig().isConfigured) { const client = await createBrowserSupabaseClient(); const ticket = await createSupportTicket(client, { profileId: state.auth.user?.id, payload }); setRemoteInquiries((items) => [ticket, ...items]); } } catch {} dispatch({ type: 'SUBMIT_SUPPORT', payload }); e.currentTarget.reset(); }}><h2 className="text-xl font-black">Submit a request</h2><input name="subject" placeholder="Subject" required /><textarea name="description" placeholder="Description" required /><label className="grid min-h-28 place-items-center rounded-card border-2 border-dashed"><Camera /> Optional screenshot upload</label><button className="h-12 rounded-full bg-primary font-black text-white">Submit</button></form><section className="mt-6 rounded-card bg-white p-5 shadow-soft"><h2 className="text-xl font-black">My inquiries</h2>{inquiries.length ? inquiries.map((item) => <p key={item.id}>{item.subject} · {item.status}</p>) : <p>No inquiries yet</p>}</section></main>;
 }

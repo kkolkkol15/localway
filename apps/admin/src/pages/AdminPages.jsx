@@ -12,6 +12,20 @@ import {
   getSupabaseAdminConfig,
   rejectGuideApplication
 } from '../lib/guideApplicationsApi.js';
+import {
+  createNotice,
+  createPlatformSetting,
+  deleteNotice,
+  fetchAdminMembers,
+  fetchAdminReviews,
+  fetchAdminTours,
+  fetchNotices,
+  fetchPlatformSettings,
+  fetchSupportTickets,
+  replyToSupportTicket,
+  updateReviewStatus,
+  updateTourStatus
+} from '../lib/adminDataApi.js';
 
 const money = (value) => `${value.toLocaleString('ko-KR')}원`;
 const badgeClass = (value) => `badge ${['대기', '열림', '처리중', 'pending'].includes(value) ? 'warn' : ['벤', '거절', '삭제', 'rejected'].includes(value) ? 'danger' : 'ok'}`;
@@ -191,8 +205,20 @@ export function MemberManagement() {
   const [tab, setTab] = useState('travelers');
   const [selected, setSelected] = useState(null);
   const [action, setAction] = useState(null);
+  const [remoteMembers, setRemoteMembers] = useState({ travelers: [], guides: [] });
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
   const isTraveler = tab === 'travelers';
-  const rows = isTraveler ? state.travelers : state.guides;
+  useEffect(() => {
+    let active = true;
+    fetchAdminMembers(client)
+      .then((members) => { if (active) setRemoteMembers(members); })
+      .catch(() => { if (active) setRemoteMembers({ travelers: [], guides: [] }); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const rows = isTraveler ? (remoteMembers.travelers.length ? remoteMembers.travelers : state.travelers) : (remoteMembers.guides.length ? remoteMembers.guides : state.guides);
   const columns = isTraveler ? [
     { key: 'name', label: '이름', sortable: true }, { key: 'email', label: '이메일', sortable: true }, { key: 'joinedAt', label: '가입일', sortable: true },
     { key: 'bookings', label: '총 예약 수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
@@ -217,16 +243,43 @@ export function TourManagement() {
   const [city, setCity] = useState('전체');
   const [selected, setSelected] = useState(null);
   const [pause, setPause] = useState(null);
-  const rows = city === '전체' ? state.tours : state.tours.filter((item) => item.city === city || item.type === city || item.status === city);
+  const [remoteTours, setRemoteTours] = useState([]);
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  useEffect(() => {
+    let active = true;
+    fetchAdminTours(client)
+      .then((items) => { if (active) setRemoteTours(items); })
+      .catch(() => { if (active) setRemoteTours([]); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const tourRows = remoteTours.length ? remoteTours : state.tours;
+  const rows = city === '전체' ? tourRows : tourRows.filter((item) => item.city === city || item.type === city || item.status === city);
+  const pauseTour = async (tour, reason) => {
+    try {
+      await updateTourStatus(client, { tourId: tour.id, status: 'paused' });
+      setRemoteTours((items) => items.map((item) => item.id === tour.id ? { ...item, status: 'paused', pauseReason: reason } : item));
+    } catch {}
+    dispatch({ type: 'PAUSE_TOUR', payload: { id: tour.id, reason } });
+  };
+  const resumeTour = async (tour) => {
+    try {
+      await updateTourStatus(client, { tourId: tour.id, status: 'active' });
+      setRemoteTours((items) => items.map((item) => item.id === tour.id ? { ...item, status: 'active', pauseReason: '' } : item));
+    } catch {}
+    dispatch({ type: 'RESUME_TOUR', payload: { id: tour.id } });
+  };
   return (
     <>
       <DataTable rows={rows} searchPlaceholder="투어, 도시, 가이드 검색" filters={<select value={city} onChange={(event) => setCity(event.target.value)}>{['전체', '서울', '부산', '제주', '문화', '미식', '자연', '활성', '일시정지'].map((item) => <option key={item}>{item}</option>)}</select>} columns={[
         { key: 'thumbnail', label: '썸네일', render: (row) => <img className="thumb" src={row.thumbnail} alt="" /> }, { key: 'title', label: '제목', sortable: true }, { key: 'guide', label: '가이드', sortable: true }, { key: 'city', label: '도시', sortable: true },
         { key: 'createdAt', label: '등록일', sortable: true }, { key: 'bookings', label: '예약 건수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-        { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>{row.status === '활성' ? <ActionButton icon={Pause} onClick={() => setPause(row)}>정지</ActionButton> : <ActionButton icon={Play} tone="primary" onClick={() => dispatch({ type: 'RESUME_TOUR', payload: { id: row.id } })}>재개</ActionButton>}</div> }
+        { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>{['활성', 'active'].includes(row.status) ? <ActionButton icon={Pause} onClick={() => setPause(row)}>정지</ActionButton> : <ActionButton icon={Play} tone="primary" onClick={() => resumeTour(row)}>재개</ActionButton>}</div> }
       ]} />
       {selected && <Modal title="투어 상세" onClose={() => setSelected(null)} wide><div className="detail-grid"><img src={selected.thumbnail} alt="" /><div><h3>{selected.title}</h3><p>{selected.description}</p><p>{selected.price} · {selected.options}</p></div></div></Modal>}
-      {pause && <ReasonModal title="투어 일시 정지" onClose={() => setPause(null)} onSubmit={(reason) => dispatch({ type: 'PAUSE_TOUR', payload: { id: pause.id, reason } })} />}
+      {pause && <ReasonModal title="투어 일시 정지" onClose={() => setPause(null)} onSubmit={(reason) => pauseTour(pause, reason)} />}
     </>
   );
 }
@@ -252,14 +305,48 @@ export function BookingPayments() {
 
 export function SupportTickets() {
   const { state, dispatch } = useAdmin();
+  const [remoteTickets, setRemoteTickets] = useState([]);
   const [selected, setSelected] = useState(state.tickets[0]);
   const [body, setBody] = useState('');
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  useEffect(() => {
+    let active = true;
+    fetchSupportTickets(client)
+      .then((items) => {
+        if (!active) return;
+        const rows = items.map((item) => ({
+          ...item,
+          title: item.subject,
+          author: item.profiles?.display_name || item.profiles?.email || '-',
+          createdAt: item.created_at,
+          thread: [item.description, item.admin_reply].filter(Boolean)
+        }));
+        setRemoteTickets(rows);
+        setSelected((current) => current ?? rows[0]);
+      })
+      .catch(() => { if (active) setRemoteTickets([]); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const rows = remoteTickets.length ? remoteTickets : state.tickets;
+  const answerTicket = async () => {
+    if (!selected) return;
+    const reply = body || '확인 후 처리 완료했습니다.';
+    try {
+      await replyToSupportTicket(client, { ticketId: selected.id, reply });
+      setRemoteTickets((items) => items.map((item) => item.id === selected.id ? { ...item, status: 'closed', admin_reply: reply, thread: [...(item.thread ?? []), reply] } : item));
+    } catch {}
+    dispatch({ type: 'ANSWER_TICKET', payload: { id: selected.id, body: reply } });
+    setBody('');
+  };
   return (
     <div className="split-view">
-      <DataTable rows={state.tickets} searchPlaceholder="티켓 검색" onRowClick={setSelected} columns={[
+      <DataTable rows={rows} searchPlaceholder="티켓 검색" onRowClick={setSelected} columns={[
         { key: 'id', label: '티켓 번호', sortable: true }, { key: 'title', label: '제목', sortable: true }, { key: 'author', label: '작성자', sortable: true }, { key: 'createdAt', label: '등록일', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> }
       ]} />
-      {selected && <aside className="conversation panel"><h2>{selected.title}</h2>{selected.thread.map((line, index) => <p key={index}>{line}</p>)}<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="답변 입력" /><button className="primary-button" onClick={() => { dispatch({ type: 'ANSWER_TICKET', payload: { id: selected.id, body: body || '확인 후 처리 완료했습니다.' } }); setBody(''); }}>전송</button></aside>}
+      {selected && <aside className="conversation panel"><h2>{selected.title}</h2>{(selected.thread ?? []).map((line, index) => <p key={index}>{line}</p>)}<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="답변 입력" /><button className="primary-button" onClick={answerTicket}>전송</button></aside>}
     </div>
   );
 }
@@ -287,17 +374,46 @@ export function ReviewManagement() {
   const { state, dispatch } = useAdmin();
   const [mode, setMode] = useState('전체');
   const [target, setTarget] = useState(null);
+  const [remoteReviews, setRemoteReviews] = useState([]);
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  useEffect(() => {
+    let active = true;
+    fetchAdminReviews(client)
+      .then((items) => {
+        if (!active) return;
+        setRemoteReviews(items.map((item) => ({
+          ...item,
+          content: item.content,
+          author: item.profiles?.display_name || '-',
+          tour: item.tours?.title || '-',
+          reports: item.reports ?? 0
+        })));
+      })
+      .catch(() => { if (active) setRemoteReviews([]); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const reviewRows = remoteReviews.length ? remoteReviews : state.reviews;
   const rows = useMemo(() => {
-    if (mode === '신고') return state.reviews.filter((item) => item.reports > 0);
-    if (mode === '낮은별점') return [...state.reviews].sort((a, b) => a.rating - b.rating);
-    return state.reviews;
-  }, [mode, state.reviews]);
+    if (mode === '신고') return reviewRows.filter((item) => item.reports > 0);
+    if (mode === '낮은별점') return [...reviewRows].sort((a, b) => a.rating - b.rating);
+    return reviewRows;
+  }, [mode, reviewRows]);
+  const deleteReview = async (review, reason) => {
+    try {
+      await updateReviewStatus(client, { reviewId: review.id, status: 'deleted' });
+      setRemoteReviews((items) => items.map((item) => item.id === review.id ? { ...item, status: 'deleted', deleteReason: reason } : item));
+    } catch {}
+    dispatch({ type: 'DELETE_REVIEW', payload: { id: review.id, reason } });
+  };
   return (
     <>
       <DataTable rows={rows} filters={<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="전체">전체</option><option value="신고">신고된 후기만</option><option value="낮은별점">별점 낮은 순</option></select>} columns={[
         { key: 'rating', label: '별점', sortable: true, render: (row) => `${row.rating}점` }, { key: 'content', label: '내용 일부', sortable: true }, { key: 'author', label: '작성자', sortable: true }, { key: 'tour', label: '대상 투어', sortable: true }, { key: 'reports', label: '신고 수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> }, { key: 'actions', label: '관리', render: (row) => <ActionButton icon={Trash2} onClick={() => setTarget(row)}>삭제</ActionButton> }
       ]} />
-      {target && <ReasonModal title="후기 삭제" onClose={() => setTarget(null)} onSubmit={(reason) => dispatch({ type: 'DELETE_REVIEW', payload: { id: target.id, reason } })} />}
+      {target && <ReasonModal title="후기 삭제" onClose={() => setTarget(null)} onSubmit={(reason) => deleteReview(target, reason)} />}
     </>
   );
 }
@@ -305,19 +421,41 @@ export function ReviewManagement() {
 export function NoticeManagement() {
   const { state, dispatch } = useAdmin();
   const [open, setOpen] = useState(false);
+  const [remoteNotices, setRemoteNotices] = useState([]);
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  useEffect(() => {
+    let active = true;
+    fetchNotices(client)
+      .then((items) => {
+        if (active) setRemoteNotices(items.map((item) => ({ ...item, createdAt: item.created_at, isPublic: item.is_public })));
+      })
+      .catch(() => { if (active) setRemoteNotices([]); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const rows = remoteNotices.length ? remoteNotices : state.notices;
+  const removeNotice = async (notice) => {
+    try {
+      await deleteNotice(client, notice.id);
+      setRemoteNotices((items) => items.filter((item) => item.id !== notice.id));
+    } catch {}
+    dispatch({ type: 'DELETE_NOTICE', payload: { id: notice.id } });
+  };
   return (
     <>
-      <DataTable rows={state.notices} actions={<button className="primary-button compact" onClick={() => setOpen(true)}><Plus size={16} />새 공지 작성</button>} columns={[
-        { key: 'title', label: '제목', sortable: true }, { key: 'createdAt', label: '작성일', sortable: true }, { key: 'isPublic', label: '공개 여부', render: (row) => row.isPublic ? '공개' : '비공개' }, { key: 'actions', label: '관리', render: (row) => <ActionButton icon={Trash2} onClick={() => dispatch({ type: 'DELETE_NOTICE', payload: { id: row.id } })}>삭제</ActionButton> }
+      <DataTable rows={rows} actions={<button className="primary-button compact" onClick={() => setOpen(true)}><Plus size={16} />새 공지 작성</button>} columns={[
+        { key: 'title', label: '제목', sortable: true }, { key: 'createdAt', label: '작성일', sortable: true }, { key: 'isPublic', label: '공개 여부', render: (row) => row.isPublic ? '공개' : '비공개' }, { key: 'actions', label: '관리', render: (row) => <ActionButton icon={Trash2} onClick={() => removeNotice(row)}>삭제</ActionButton> }
       ]} />
-      {open && <NoticeForm onClose={() => setOpen(false)} />}
+      {open && <NoticeForm client={client} adminId={state.auth.admin?.id} onCreated={(notice) => setRemoteNotices((items) => [{ ...notice, createdAt: notice.created_at, isPublic: notice.is_public }, ...items])} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function NoticeForm({ onClose }) {
+function NoticeForm({ client, adminId, onCreated, onClose }) {
   const { dispatch } = useAdmin();
-  return <Modal title="새 공지 작성" onClose={onClose}><form className="stack" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); dispatch({ type: 'CREATE_NOTICE', payload: { title: form.get('title'), content: form.get('content'), isPublic: form.get('isPublic') === 'on' } }); onClose(); }}><label>제목<input name="title" required /></label><label>내용<textarea name="content" required /></label><label className="check-line"><input name="isPublic" type="checkbox" defaultChecked /> 공개</label><button className="primary-button">등록</button></form></Modal>;
+  return <Modal title="새 공지 작성" onClose={onClose}><form className="stack" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const payload = { title: form.get('title'), content: form.get('content'), isPublic: form.get('isPublic') === 'on' }; try { const notice = await createNotice(client, { adminId, payload }); if (notice) onCreated?.(notice); } catch {} dispatch({ type: 'CREATE_NOTICE', payload }); onClose(); }}><label>제목<input name="title" required /></label><label>내용<textarea name="content" required /></label><label className="check-line"><input name="isPublic" type="checkbox" defaultChecked /> 공개</label><button className="primary-button">등록</button></form></Modal>;
 }
 
 export function GuideMessages() {
@@ -340,26 +478,48 @@ export function GuideMessages() {
 
 export function SystemSettings() {
   const { state, dispatch } = useAdmin();
+  const [remoteSettings, setRemoteSettings] = useState({ tourTypes: [], languages: [], options: [], admins: [] });
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  useEffect(() => {
+    let active = true;
+    fetchPlatformSettings(client)
+      .then((items) => {
+        if (!active) return;
+        const grouped = { tourTypes: [], languages: [], options: [], admins: [] };
+        items.forEach((item) => {
+          const key = item.group_key === 'tour_types' ? 'tourTypes' : item.group_key;
+          if (grouped[key]) grouped[key].push({ id: item.id, name: item.name, active: item.active });
+        });
+        setRemoteSettings(grouped);
+      })
+      .catch(() => { if (active) setRemoteSettings({ tourTypes: [], languages: [], options: [], admins: [] }); });
+    return () => {
+      active = false;
+    };
+  }, [client]);
   const groups = [
     ['tourTypes', '투어 유형'],
     ['languages', '언어 목록'],
     ['options', '옵션 항목']
   ];
+  const settings = Object.values(remoteSettings).some((items) => items.length) ? remoteSettings : state.settings;
   return (
     <div className="settings-grid">
-      {groups.map(([key, label]) => <SettingPanel key={key} group={key} label={label} items={state.settings[key]} dispatch={dispatch} />)}
-      <section className="panel"><h2>관리자 계정</h2>{state.settings.admins.map((admin) => <div className="setting-row" key={admin.id}><span>{admin.name}</span><b>{admin.role}</b></div>)}<button className="ghost-button compact"><Plus size={16} />계정 추가</button></section>
+      {groups.map(([key, label]) => <SettingPanel key={key} group={key} label={label} items={settings[key]} dispatch={dispatch} client={client} onCreated={(item) => setRemoteSettings((current) => ({ ...current, [key]: [{ id: item.id, name: item.name, active: item.active }, ...(current[key] ?? [])] }))} />)}
+      <section className="panel"><h2>관리자 계정</h2>{settings.admins.map((admin) => <div className="setting-row" key={admin.id}><span>{admin.name}</span><b>{admin.role}</b></div>)}<button className="ghost-button compact"><Plus size={16} />계정 추가</button></section>
     </div>
   );
 }
 
-function SettingPanel({ group, label, items, dispatch }) {
+function SettingPanel({ group, label, items, dispatch, client, onCreated }) {
   const [name, setName] = useState('');
+  const groupKey = group === 'tourTypes' ? 'tour_types' : group;
   return (
     <section className="panel">
       <h2>{label}</h2>
       {items.map((item) => <div className="setting-row" key={item.id}><span>{item.name}</span><button className="ghost-button compact" onClick={() => dispatch({ type: 'TOGGLE_SETTING', payload: { group, id: item.id } })}>{item.active ? '활성' : '비활성'}</button></div>)}
-      <form className="inline-form" onSubmit={(event) => { event.preventDefault(); if (name.trim()) dispatch({ type: 'ADD_SETTING', payload: { group, name } }); setName(''); }}>
+      <form className="inline-form" onSubmit={async (event) => { event.preventDefault(); if (name.trim()) { try { const created = await createPlatformSetting(client, { group: groupKey, name }); if (created) onCreated?.(created); } catch {} dispatch({ type: 'ADD_SETTING', payload: { group, name } }); } setName(''); }}>
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder={`${label} 추가`} />
         <button className="primary-button compact" type="submit"><Plus size={16} />추가</button>
       </form>
