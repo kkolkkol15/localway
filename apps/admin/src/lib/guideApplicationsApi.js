@@ -78,6 +78,12 @@ export function getReadableSupabaseAuthError(message) {
 }
 
 export function createSupabaseRestClient(config = getSupabaseAdminConfig(), fetcher = fetch) {
+  const headers = {
+    apikey: config.publishableKey,
+    Authorization: `Bearer ${config.accessToken || config.publishableKey}`,
+    'Content-Type': 'application/json'
+  };
+
   return {
     config,
     isConfigured: config.isConfigured,
@@ -87,9 +93,7 @@ export function createSupabaseRestClient(config = getSupabaseAdminConfig(), fetc
       const response = await fetcher(`${config.url}/rest/v1/${table}${query}`, {
         method,
         headers: {
-          apikey: config.publishableKey,
-          Authorization: `Bearer ${config.accessToken || config.publishableKey}`,
-          'Content-Type': 'application/json',
+          ...headers,
           Prefer: prefer
         },
         body: body ? JSON.stringify(body) : undefined
@@ -102,6 +106,29 @@ export function createSupabaseRestClient(config = getSupabaseAdminConfig(), fetc
 
       if (response.status === 204) return [];
       return response.json();
+    },
+    async count(table, { query = '' } = {}) {
+      if (!config.isConfigured) return 0;
+
+      const filters = query.startsWith('?') ? query.slice(1) : query;
+      const countQuery = filters ? `?select=id&${filters}` : '?select=id';
+      const response = await fetcher(`${config.url}/rest/v1/${table}${countQuery}`, {
+        method: 'GET',
+        headers: {
+          ...headers,
+          Prefer: 'count=exact',
+          Range: '0-0'
+        }
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `Supabase count failed with ${response.status}`);
+      }
+
+      const contentRange = response.headers?.get?.('content-range') || response.headers?.get?.('Content-Range') || '';
+      const total = Number(contentRange.split('/').at(-1));
+      return Number.isFinite(total) ? total : 0;
     }
   };
 }
@@ -233,13 +260,11 @@ export async function approveGuideApplication(client, application, reviewerId) {
     body: { status: 'approved', reviewed_at: reviewedAt, reviewed_by: reviewerId || null, rejection_reason: null }
   });
 
-  if (application.user_id !== reviewerId) {
-    await client.request('profiles', {
-      method: 'PATCH',
-      query: `?id=eq.${application.user_id}`,
-      body: { role: 'guide' }
-    });
-  }
+  await client.request('profiles', {
+    method: 'PATCH',
+    query: `?id=eq.${application.user_id}`,
+    body: { is_guide: true }
+  });
 
   return applicationUpdate[0] ?? { ...application, status: 'approved', reviewed_at: reviewedAt };
 }

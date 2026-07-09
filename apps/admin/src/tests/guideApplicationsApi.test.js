@@ -101,7 +101,7 @@ test('createGuideVerificationSignedUrl signs private guide verification paths', 
   }
 });
 
-test('approveGuideApplication creates the guide profile before changing the user role', async () => {
+test('approveGuideApplication creates the guide profile before marking the account as a guide', async () => {
   const calls = [];
   const client = {
     request: async (table, options) => {
@@ -122,10 +122,10 @@ test('approveGuideApplication creates the guide profile before changing the user
   }, '90000000-0000-4000-8000-000000000001');
 
   assert.deepEqual(calls.map(([table]) => table), ['guide_profiles', 'guide_applications', 'profiles']);
-  assert.equal(calls[2][2].role, 'guide');
+  assert.deepEqual(calls[2][2], { is_guide: true });
 });
 
-test('approveGuideApplication keeps admin role when an admin approves own guide application', async () => {
+test('approveGuideApplication marks admin guide accounts without changing their role', async () => {
   const calls = [];
   const client = {
     request: async (table, options) => {
@@ -145,7 +145,8 @@ test('approveGuideApplication keeps admin role when an admin approves own guide 
     profile_image_path: 'profile.jpg'
   }, '10000000-0000-4000-8000-000000000001');
 
-  assert.deepEqual(calls.map(([table]) => table), ['guide_profiles', 'guide_applications']);
+  assert.deepEqual(calls.map(([table]) => table), ['guide_profiles', 'guide_applications', 'profiles']);
+  assert.deepEqual(calls[2][2], { is_guide: true });
 });
 
 test('signInAdminWithPassword explains when the account lost admin permission', async () => {

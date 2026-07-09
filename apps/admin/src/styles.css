@@ -97,6 +97,7 @@ textarea { min-height: 110px; resize: vertical; }
 .content { padding: 28px; }
 .page-grid, .settings-grid { display: grid; gap: 20px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.member-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
 .metric-card { padding: 20px; }
 .metric-card p { margin: 0 0 12px; color: var(--muted); }
 .metric-card strong { display: block; font-size: clamp(28px, 4vw, 42px); }
@@ -235,7 +236,7 @@ tr:hover td { background: rgba(234, 92, 42, 0.04); }
   .top-actions { justify-content: flex-end; }
   .top-actions span { display: none; }
   .content { padding: 16px; }
-  .metric-grid { grid-template-columns: 1fr; }
+  .metric-grid, .member-summary-grid { grid-template-columns: 1fr; }
   .table-toolbar, .pagination { align-items: stretch; flex-direction: column; }
   .detail-grid { grid-template-columns: 1fr; }
   .verification-image-grid { grid-template-columns: 1fr; }

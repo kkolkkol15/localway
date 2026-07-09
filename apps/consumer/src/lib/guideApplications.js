@@ -38,8 +38,47 @@ export function buildGuideApplicationRow(payload, { userId, realName, profileIma
   };
 }
 
+export function getGuideApplicationBlockMessage(record) {
+  if (record?.status === 'pending') return 'A guide application is already pending review.';
+  return 'This account is already approved as a guide.';
+}
+
+async function fetchActiveGuideApplication(client, userId) {
+  const { data, error } = await client
+    .from('guide_applications')
+    .select('id,status')
+    .eq('user_id', userId)
+    .in('status', ['pending', 'approved'])
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function fetchExistingGuideProfile(client, userId) {
+  const { data, error } = await client
+    .from('guide_profiles')
+    .select('id,status')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function assertCanSubmitGuideApplication(client, userId) {
+  const application = await fetchActiveGuideApplication(client, userId);
+  if (application) throw new Error(getGuideApplicationBlockMessage(application));
+
+  const guideProfile = await fetchExistingGuideProfile(client, userId);
+  if (guideProfile) throw new Error(getGuideApplicationBlockMessage({ status: 'approved' }));
+}
+
 export async function submitGuideApplication(client, { payload, formElement, user }) {
   if (!user?.id) throw new Error('You must be logged in to submit a guide application.');
+  await assertCanSubmitGuideApplication(client, user.id);
 
   const form = new FormData(formElement);
   const profileImagePath = await uploadGuideVerificationFile(client, {

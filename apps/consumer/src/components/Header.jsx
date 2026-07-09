@@ -82,7 +82,7 @@ export function Header() {
     else navigate(path);
   }
 
-  const showGuideRegistration = !state.auth.isAuthenticated || !isRegisteredGuideRole(state.auth.user?.role);
+  const showGuideRegistration = !state.auth.isAuthenticated || !isRegisteredGuideRole(state.auth.user?.role, state.auth.user?.isGuide);
   const nav = (
     <>
       {showGuideRegistration && <button className="header-nav-item" onClick={() => goProtected('/register-guide')}>{t('nav.guide')}</button>}

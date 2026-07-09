@@ -30,10 +30,10 @@ test('buildSupabaseAuthOptions keeps browser auth in session storage only', () =
   assert.equal(options.auth.storage, sessionStorage);
 });
 
-test('mapAuthUser prefers profile display name and role', () => {
+test('mapAuthUser treats guide capability separately from admin role', () => {
   const user = mapAuthUser(
     { id: 'user-1', email: 'mina@example.com', user_metadata: { display_name: 'Metadata Name' } },
-    { display_name: 'Mina Kim', avatar_path: 'avatars/user-1.jpg', role: 'guide' }
+    { display_name: 'Mina Kim', avatar_path: 'avatars/user-1.jpg', role: 'traveler', is_guide: true }
   );
 
   assert.deepEqual(user, {
@@ -41,7 +41,8 @@ test('mapAuthUser prefers profile display name and role', () => {
     email: 'mina@example.com',
     name: 'Mina Kim',
     avatar: 'avatars/user-1.jpg',
-    role: 'guide'
+    role: 'guide',
+    isGuide: true
   });
 });
 
@@ -76,7 +77,7 @@ test('signInWithEmail returns active guide profile for approved guides', async (
       },
       maybeSingle: async () => ({
         data: table === 'profiles'
-          ? { display_name: 'Mina', avatar_path: '', role: 'guide' }
+          ? { display_name: 'Mina', avatar_path: '', role: 'traveler', is_guide: true }
           : { id: 'guide-profile-1', user_id: 'user-1', city: 'Seoul', languages: ['Korean'], intro: 'Intro', profile_image_path: '', status: 'active' },
         error: null
       })
@@ -99,6 +100,7 @@ test('signInWithEmail returns active guide profile for approved guides', async (
   });
 
   assert.equal(result.user.role, 'guide');
+  assert.equal(result.user.isGuide, true);
   assert.equal(result.guideProfile.id, 'guide-profile-1');
   assert.deepEqual(calls.filter(([table]) => table === 'guide_profiles').map(([, column]) => column), ['user_id', 'status']);
 });
@@ -109,7 +111,7 @@ test('signInWithEmail also returns guide profile for admin guide accounts', asyn
       eq: () => builder,
       maybeSingle: async () => ({
         data: table === 'profiles'
-          ? { display_name: 'Admin Guide', avatar_path: '', role: 'admin' }
+          ? { display_name: 'Admin Guide', avatar_path: '', role: 'admin', is_guide: true }
           : { id: 'guide-profile-1', user_id: 'user-1', city: 'Seoul', languages: ['Korean'], intro: 'Intro', profile_image_path: '', status: 'active' },
         error: null
       })
@@ -132,6 +134,7 @@ test('signInWithEmail also returns guide profile for admin guide accounts', asyn
   });
 
   assert.equal(result.user.role, 'admin');
+  assert.equal(result.user.isGuide, true);
   assert.equal(result.guideProfile.id, 'guide-profile-1');
 });
 
@@ -261,7 +264,7 @@ test('signInWithEmail returns mapped profile after password login', async () => 
       select: () => ({
         eq: () => ({
           maybeSingle: async () => ({
-            data: { display_name: 'Mina', avatar_path: '', role: 'traveler' },
+            data: { display_name: 'Mina', avatar_path: '', role: 'traveler', is_guide: false },
             error: null
           })
         })
@@ -279,6 +282,7 @@ test('signInWithEmail returns mapped profile after password login', async () => 
     email: 'mina@example.com',
     name: 'Mina',
     avatar: '',
-    role: 'traveler'
+    role: 'traveler',
+    isGuide: false
   });
 });

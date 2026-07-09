@@ -502,7 +502,7 @@ export function GuideRegistrationPage() {
   const [agree, setAgree] = useState(draft?.agreements ?? [false, false, false]);
   const [draftNotice, setDraftNotice] = useState('');
   const [submitBusy, setSubmitBusy] = useState(false);
-  if (['pending-guide', 'guide'].includes(state.auth.user?.role)) return <Navigate to="/mypage/guide-mode" replace />;
+  if (isRegisteredGuideRole(state.auth.user?.role, state.auth.user?.isGuide)) return <Navigate to="/mypage/guide-mode" replace />;
   const canSubmit = agree.every(Boolean);
   const saveDraft = (formElement) => {
     const payload = buildGuideApplicationPayload(formElement, { agreements: agree, draftId: draft?.id });
@@ -890,7 +890,7 @@ function SearchInputOnly({ name, options, placeholder, value, onChange, restrict
 export function MyPage() {
   const { state, dispatch } = useAppState();
   const navigate = useNavigate();
-  const registeredGuide = isRegisteredGuideRole(state.auth.user.role);
+  const registeredGuide = isRegisteredGuideRole(state.auth.user.role, state.auth.user.isGuide);
   const menu = [
     { label: 'My Bookings', path: '/mypage/bookings', description: 'Upcoming reservations and trip chats', Icon: CalendarDays, tone: 'orange' },
     { label: 'Past Trips', path: '/mypage/past-trips', description: 'Completed travel history in one place', Icon: Check, tone: 'green' },

@@ -47,8 +47,8 @@ export function createInitialState() {
   };
 }
 
-export function isRegisteredGuideRole(role) {
-  return ['guide', 'pending-guide'].includes(role);
+export function isRegisteredGuideRole(role, isGuide = false) {
+  return Boolean(isGuide) || ['guide', 'pending-guide'].includes(role);
 }
 
 export function formatRoleLabel(role = 'traveler') {
@@ -110,7 +110,8 @@ export function appReducer(state, action) {
               email: action.payload.user.email,
               name: action.payload.user.displayName ?? action.payload.user.name,
               avatar: action.payload.user.avatar ?? '',
-              role: action.payload.user.role ?? 'traveler'
+              role: action.payload.user.role ?? 'traveler',
+              isGuide: Boolean(action.payload.user.isGuide)
             }
           },
           guideProfile: action.payload.guideProfile ?? state.guideProfile

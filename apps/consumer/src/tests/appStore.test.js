@@ -241,6 +241,7 @@ test('guide profile update stores guide fields and syncs avatar', () => {
 test('registered guide roles hide the guide application shortcut', () => {
   assert.equal(isRegisteredGuideRole('guide'), true);
   assert.equal(isRegisteredGuideRole('pending-guide'), true);
+  assert.equal(isRegisteredGuideRole('admin', true), true);
   assert.equal(isRegisteredGuideRole('traveler'), false);
 });
 

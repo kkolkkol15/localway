@@ -42,6 +42,7 @@ export function mapProfileToAdminMember(profile = {}) {
     name: profile.display_name || profile.email || 'Member',
     email: profile.email || '',
     role: profile.role || 'traveler',
+    isGuide: Boolean(profile.is_guide),
     joinedAt: profile.created_at || '',
     status: profile.status || 'active',
     bookings: profile.reservations?.length ?? 0
@@ -78,16 +79,50 @@ export function mapTourToAdminRow(tour = {}) {
   };
 }
 
+export function buildMemberIntegrityWarnings({ profiles = [], guideProfiles = [], travelerCount = 0 } = {}) {
+  const profilesById = Object.fromEntries(profiles.map((profile) => [profile.id, profile]));
+  const activeGuideProfiles = guideProfiles.filter((profile) => profile.status === 'active');
+  const orphanGuideProfiles = activeGuideProfiles.filter((profile) => !profilesById[profile.user_id]);
+  const unflaggedGuideProfiles = activeGuideProfiles.filter((profile) => {
+    const memberProfile = profilesById[profile.user_id];
+    return memberProfile && !memberProfile.is_guide;
+  });
+  const nonAdminGuideCount = activeGuideProfiles.filter((profile) => profilesById[profile.user_id]?.role !== 'admin').length;
+  return [
+    orphanGuideProfiles.length ? `${orphanGuideProfiles.length}개의 가이드 프로필이 회원 프로필과 연결되지 않았습니다.` : '',
+    unflaggedGuideProfiles.length ? `${unflaggedGuideProfiles.length}명의 가이드 회원에 is_guide가 설정되어 있지 않습니다.` : '',
+    nonAdminGuideCount > travelerCount ? '일반 가이드 수가 여행객/회원 수보다 많습니다.' : ''
+  ].filter(Boolean);
+}
+
+export function buildMemberMessagePayload(member = {}) {
+  return {
+    target: member.name || member.email || '회원',
+    title: '개별 안내',
+    body: '관리자 메시지입니다.'
+  };
+}
+
 export async function fetchAdminMembers(client) {
   const profiles = await client.request('profiles', {
-    query: '?select=id,email,display_name,role,status,created_at'
+    query: '?select=id,email,display_name,role,is_guide,status,created_at'
   });
   const guideProfiles = await client.request('guide_profiles', {
     query: '?select=*,tours(id)'
   });
+  const [travelerCount, guideCount] = await Promise.all([
+    client.count('profiles', { query: '?role=neq.admin' }),
+    client.count('guide_profiles', { query: '?status=eq.active' })
+  ]);
+
   return {
-    travelers: profiles.filter((profile) => profile.role !== 'guide').map(mapProfileToAdminMember),
-    guides: guideProfiles.map(mapGuideProfileToAdminGuide)
+    travelers: profiles.filter((profile) => profile.role !== 'admin').map(mapProfileToAdminMember),
+    guides: guideProfiles.map(mapGuideProfileToAdminGuide),
+    stats: {
+      travelers: travelerCount,
+      guides: guideCount
+    },
+    integrityWarnings: buildMemberIntegrityWarnings({ profiles, guideProfiles, travelerCount })
   };
 }
 

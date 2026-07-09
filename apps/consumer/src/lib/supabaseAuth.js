@@ -33,13 +33,16 @@ export async function createBrowserSupabaseClient(env = import.meta.env) {
 
 export function mapAuthUser(authUser, profile = null) {
   const displayName = profile?.display_name || authUser.user_metadata?.display_name || authUser.email?.split('@')[0] || 'Traveler';
+  const isGuide = Boolean(profile?.is_guide || profile?.role === 'guide');
+  const role = isGuide && profile?.role !== 'admin' ? 'guide' : profile?.role || 'traveler';
 
   return {
     id: authUser.id,
     email: authUser.email,
     name: displayName,
     avatar: profile?.avatar_path || authUser.user_metadata?.avatar_url || '',
-    role: profile?.role || 'traveler'
+    role,
+    isGuide
   };
 }
 
@@ -82,7 +85,7 @@ export function getAuthErrorMessage(error) {
 async function getProfile(client, userId) {
   const { data, error } = await client
     .from('profiles')
-    .select('display_name, avatar_path, role')
+    .select('display_name, avatar_path, role, is_guide')
     .eq('id', userId)
     .maybeSingle();
 
@@ -148,7 +151,7 @@ export async function signInWithEmail(client, { email, password }) {
   if (!data.user) throw new Error('No user returned from login.');
 
   const profile = await getProfile(client, data.user.id);
-  const guideProfile = ['guide', 'admin'].includes(profile?.role) ? await getGuideProfile(client, data.user.id) : null;
+  const guideProfile = (profile?.is_guide || ['guide', 'admin'].includes(profile?.role)) ? await getGuideProfile(client, data.user.id) : null;
   return { user: mapAuthUser(data.user, profile), guideProfile: mapGuideProfile(guideProfile) };
 }
 

@@ -16,6 +16,7 @@ import {
   createNotice,
   createPlatformSetting,
   deleteNotice,
+  buildMemberMessagePayload,
   fetchAdminMembers,
   fetchAdminReviews,
   fetchAdminTours,
@@ -205,31 +206,38 @@ export function MemberManagement() {
   const [tab, setTab] = useState('travelers');
   const [selected, setSelected] = useState(null);
   const [action, setAction] = useState(null);
-  const [remoteMembers, setRemoteMembers] = useState({ travelers: [], guides: [] });
+  const [remoteMembers, setRemoteMembers] = useState({ travelers: [], guides: [], stats: { travelers: null, guides: null }, statsError: '', integrityWarnings: [] });
   const config = getSupabaseAdminConfig();
   const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
   const isTraveler = tab === 'travelers';
   useEffect(() => {
     let active = true;
     fetchAdminMembers(client)
-      .then((members) => { if (active) setRemoteMembers(members); })
-      .catch(() => { if (active) setRemoteMembers({ travelers: [], guides: [] }); });
+      .then((members) => { if (active) setRemoteMembers({ ...members, statsError: '' }); })
+      .catch(() => { if (active) setRemoteMembers({ travelers: [], guides: [], stats: { travelers: null, guides: null }, statsError: 'DB 통계 불러오기 실패', integrityWarnings: [] }); });
     return () => {
       active = false;
     };
   }, [client]);
   const rows = isTraveler ? (remoteMembers.travelers.length ? remoteMembers.travelers : state.travelers) : (remoteMembers.guides.length ? remoteMembers.guides : state.guides);
+  const stats = remoteMembers.stats ?? { travelers: null, guides: null };
   const columns = isTraveler ? [
     { key: 'name', label: '이름', sortable: true }, { key: 'email', label: '이메일', sortable: true }, { key: 'joinedAt', label: '가입일', sortable: true },
     { key: 'bookings', label: '총 예약 수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: row.status === '벤' ? 'UNBAN_TRAVELER' : 'BAN_TRAVELER', row })}>{row.status === '벤' ? '해제' : '벤'}</ActionButton></div> }
+    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: row.status === '벤' ? 'UNBAN_TRAVELER' : 'BAN_TRAVELER', row })}>{row.status === '벤' ? '해제' : '벤'}</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => dispatch({ type: 'SEND_MESSAGE', payload: buildMemberMessagePayload(row) })}>메시지</ActionButton></div> }
   ] : [
     { key: 'name', label: '이름', sortable: true }, { key: 'city', label: '거주 도시', sortable: true }, { key: 'rating', label: '평점', sortable: true }, { key: 'tours', label: '등록 투어 수', sortable: true },
     { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: 'BAN_GUIDE', row })}>벤</ActionButton><ActionButton icon={Pause} onClick={() => setAction({ type: 'SUSPEND_GUIDE', row })}>정지</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => dispatch({ type: 'SEND_MESSAGE', payload: { target: row.name, title: '개별 안내', body: '관리자 메시지입니다.' } })}>메시지</ActionButton></div> }
+    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: 'BAN_GUIDE', row })}>벤</ActionButton><ActionButton icon={Pause} onClick={() => setAction({ type: 'SUSPEND_GUIDE', row })}>정지</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => dispatch({ type: 'SEND_MESSAGE', payload: buildMemberMessagePayload(row) })}>메시지</ActionButton></div> }
   ];
   return (
     <>
+      <section className="member-summary-grid" aria-label="회원 요약 통계">
+        <article className="metric-card"><p>가이드 총 수</p><strong>{Number.isFinite(stats.guides) ? `${stats.guides.toLocaleString('ko-KR')}명` : '-'}</strong><span>DB 전체 기준</span></article>
+        <article className="metric-card"><p>여행객 총 수</p><strong>{Number.isFinite(stats.travelers) ? `${stats.travelers.toLocaleString('ko-KR')}명` : '-'}</strong><span>DB 전체 기준</span></article>
+      </section>
+      {remoteMembers.statsError && <section className="panel notice-panel"><h2>{remoteMembers.statsError}</h2><p>목록은 사용 가능한 기본 데이터로 표시됩니다.</p></section>}
+      {remoteMembers.integrityWarnings?.length ? <section className="panel notice-panel"><h2>회원 데이터 정합성 확인 필요</h2>{remoteMembers.integrityWarnings.map((warning) => <p key={warning}>{warning}</p>)}</section> : null}
       <div className="tabs"><button className={isTraveler ? 'active' : ''} onClick={() => setTab('travelers')}>여행객</button><button className={!isTraveler ? 'active' : ''} onClick={() => setTab('guides')}>가이드</button></div>
       <DataTable rows={rows} columns={columns} searchPlaceholder="회원 검색" />
       {selected && <Modal title="회원 상세" onClose={() => setSelected(null)} wide><div className="stack"><h3>{selected.name}</h3><p>{selected.profile ?? selected.email}</p><p>{selected.settlement ?? `예약 이력: ${selected.history?.join(', ')}`}</p><p>후기: {selected.reviews?.join(', ') ?? '등록 투어 리스트와 정산 정보를 확인할 수 있습니다.'}</p></div></Modal>}
