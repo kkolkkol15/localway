@@ -7,6 +7,7 @@ import {
   buildSupportTicketRow,
   buildHomepageTourSections,
   fetchActiveTours,
+  mapConversationRecord,
   mapTourRecord,
   upsertAccountSettings,
   toggleBookmark
@@ -176,6 +177,44 @@ test('buildConversationMessageRow maps message composer input', () => {
     sender_id: 'user-1',
     body: 'Hello'
   });
+});
+
+test('mapConversationRecord displays admin conversations as operating team threads', () => {
+  const mapped = mapConversationRecord({
+    id: 'conversation-1',
+    type: 'admin',
+    title: '계정 안내',
+    participant_id: 'member-1',
+    last_message: '확인해주세요.',
+    reply_enabled: true,
+    conversation_messages: [
+      { id: 'm1', sender_id: 'admin-1', body: '확인해주세요.', created_at: '2026-07-09T01:00:00Z' }
+    ]
+  }, 'member-1');
+
+  assert.equal(mapped.displayName, '계정 안내');
+  assert.equal(mapped.guideName, '계정 안내');
+  assert.equal(mapped.type, 'admin');
+  assert.equal(mapped.replyEnabled, true);
+  assert.deepEqual(mapped.messages, [{
+    id: 'm1',
+    senderId: 'admin-1',
+    from: 'them',
+    text: '확인해주세요.',
+    createdAt: '2026-07-09T01:00:00Z'
+  }]);
+});
+
+test('mapConversationRecord disables replies when reply_enabled is false', () => {
+  const mapped = mapConversationRecord({
+    id: 'notice-1',
+    type: 'notice',
+    title: '공지',
+    reply_enabled: false,
+    conversation_messages: []
+  }, 'member-1');
+
+  assert.equal(mapped.replyEnabled, false);
 });
 
 test('upsertAccountSettings writes one row per profile', async () => {

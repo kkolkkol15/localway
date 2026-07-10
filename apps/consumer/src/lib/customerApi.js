@@ -130,6 +130,30 @@ export function buildConversationMessageRow({ conversationId, senderId, body }) 
   };
 }
 
+export function mapConversationRecord(record = {}, currentUserId = '') {
+  const title = record.title || (record.type === 'admin' ? '운영팀' : 'Conversation');
+  const messages = [...(record.conversation_messages ?? [])]
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .map((message) => ({
+      id: message.id,
+      senderId: message.sender_id,
+      from: message.sender_id === currentUserId ? 'me' : 'them',
+      text: message.body,
+      createdAt: message.created_at || ''
+    }));
+  return {
+    id: record.id,
+    type: record.type ?? 'travel',
+    title,
+    displayName: title,
+    guideName: title,
+    avatar: '',
+    lastMessage: record.last_message || messages.at(-1)?.text || '',
+    replyEnabled: record.reply_enabled !== false,
+    messages
+  };
+}
+
 export async function fetchActiveTours(client, { city = '', filters = {} } = {}) {
   let query = client
     .from('tours')
@@ -224,7 +248,7 @@ export async function fetchConversations(client, profileId) {
     .or(`traveler_id.eq.${requireValue(profileId, 'A profile id is required.')},participant_id.eq.${profileId}`)
     .order('updated_at', { ascending: false });
   throwIfError(error);
-  return data ?? [];
+  return (data ?? []).map((conversation) => mapConversationRecord(conversation, profileId));
 }
 
 export async function sendConversationMessage(client, { conversationId, senderId, body }) {
