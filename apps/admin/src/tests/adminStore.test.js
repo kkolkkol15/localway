@@ -62,7 +62,7 @@ test('loads pending guide applications and updates approval decisions', () => {
   assert.equal(request.rejection_reason, '서류가 흐릿합니다.');
 });
 
-test('creates admin-authored notices and messages without initial data', () => {
+test('creates admin-authored notices and stores legacy local message logs for fallback UI actions', () => {
   let state = createInitialState();
   state = adminReducer(state, {
     type: 'CREATE_NOTICE',

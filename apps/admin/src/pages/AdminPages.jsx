@@ -17,6 +17,7 @@ import {
   createNotice,
   createPlatformSetting,
   deleteNotice,
+  fetchAdminConversations,
   fetchAdminMembers,
   fetchAdminReviews,
   fetchAdminTours,
@@ -24,6 +25,7 @@ import {
   fetchPlatformSettings,
   fetchSupportTickets,
   replyToSupportTicket,
+  sendAdminConversationMessage,
   sendAdminMemberMessage,
   updateReviewStatus,
   updateTourStatus
@@ -513,19 +515,79 @@ function NoticeForm({ client, adminId, onCreated, onClose }) {
 }
 
 export function GuideMessages() {
-  const { state, dispatch } = useAdmin();
+  const { state } = useAdmin();
+  const [conversations, setConversations] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [body, setBody] = useState('');
+  const [error, setError] = useState('');
+  const config = getSupabaseAdminConfig();
+  const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+
+  useEffect(() => {
+    let active = true;
+    fetchAdminConversations(client)
+      .then((items) => {
+        if (!active) return;
+        setConversations(items);
+        setSelected((current) => current ?? items[0] ?? null);
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError.message || '메시지를 불러오지 못했습니다.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
+  const sendReply = async () => {
+    const text = body.trim();
+    if (!selected || !text) return;
+    try {
+      const message = await sendAdminConversationMessage(client, {
+        conversationId: selected.id,
+        senderId: state.auth.admin?.id,
+        body: text
+      });
+      const nextMessage = {
+        id: message?.id || `local-${Date.now()}`,
+        senderId: state.auth.admin?.id,
+        text,
+        createdAt: message?.created_at || new Date().toISOString()
+      };
+      setConversations((items) => items.map((item) => item.id === selected.id ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item));
+      setSelected((item) => item ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item);
+      setBody('');
+      setError('');
+    } catch (sendError) {
+      setError(sendError.message || '메시지 전송에 실패했습니다.');
+    }
+  };
+
   return (
-    <div className="page-grid">
-      <section className="panel">
-        <h2>메시지 발송</h2>
-        <form className="stack" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); dispatch({ type: 'SEND_MESSAGE', payload: { target: form.get('target'), title: form.get('title'), body: form.get('body') } }); event.currentTarget.reset(); }}>
-          <label>수신 대상<select name="target"><option>전체 가이드</option>{state.guides.map((guide) => <option key={guide.id}>{guide.name}</option>)}</select></label>
-          <label>제목<input name="title" required /></label>
-          <label>내용<textarea name="body" required /></label>
-          <button className="primary-button" type="submit"><Send size={17} />발송</button>
-        </form>
-      </section>
-      <DataTable rows={state.messageLogs} searchPlaceholder="발송 로그 검색" columns={[{ key: 'sentAt', label: '발송일', sortable: true }, { key: 'target', label: '대상', sortable: true }, { key: 'title', label: '제목', sortable: true }, { key: 'body', label: '내용' }]} />
+    <div className="split-view">
+      <DataTable
+        rows={conversations}
+        searchPlaceholder="메시지 검색"
+        onRowClick={setSelected}
+        columns={[
+          { key: 'updatedAt', label: '최근일', sortable: true },
+          { key: 'memberName', label: '회원', sortable: true },
+          { key: 'title', label: '제목', sortable: true },
+          { key: 'lastMessage', label: '최근 메시지' }
+        ]}
+      />
+      <aside className="conversation panel">
+        {selected ? (
+          <>
+            <h2>{selected.memberName}</h2>
+            <p>{selected.title}</p>
+            {selected.messages.map((message) => <p key={message.id}>{message.text}</p>)}
+            <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="답변 입력" />
+            {error && <p className="form-error">{error}</p>}
+            <button className="primary-button" onClick={sendReply}>전송</button>
+          </>
+        ) : <p>대화를 선택하세요.</p>}
+      </aside>
     </div>
   );
 }

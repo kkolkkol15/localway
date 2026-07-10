@@ -191,6 +191,26 @@ test('mapConversationToAdminThread sorts messages and applies member/profile fal
   assert.equal(mapConversationToAdminThread({ profiles: {} }).memberName, '회원');
 });
 
+test('mapConversationToAdminThread maps admin conversation rows for the admin UI', () => {
+  const row = mapConversationToAdminThread({
+    id: 'conversation-1',
+    type: 'admin',
+    title: '운영팀 메시지',
+    participant_id: 'member-1',
+    last_message: '최근 메시지',
+    reply_enabled: true,
+    profiles: { display_name: 'Mina', email: 'mina@example.com' },
+    conversation_messages: [
+      { id: 'm2', sender_id: 'member-1', body: '답장', created_at: '2026-07-09T02:00:00Z' },
+      { id: 'm1', sender_id: 'admin-1', body: '안내', created_at: '2026-07-09T01:00:00Z' }
+    ]
+  });
+
+  assert.equal(row.memberName, 'Mina');
+  assert.equal(row.messages[0].text, '안내');
+  assert.equal(row.messages[1].text, '답장');
+});
+
 test('fetchAdminConversations requests admin threads and maps sorted messages', async () => {
   const calls = [];
   const client = {
