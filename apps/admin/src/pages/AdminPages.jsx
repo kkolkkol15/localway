@@ -542,9 +542,10 @@ export function GuideMessages() {
   const sendReply = async () => {
     const text = body.trim();
     if (!selected || !text) return;
+    const selectedConversationId = selected.id;
     try {
       const message = await sendAdminConversationMessage(client, {
-        conversationId: selected.id,
+        conversationId: selectedConversationId,
         senderId: state.auth.admin?.id,
         body: text
       });
@@ -554,8 +555,8 @@ export function GuideMessages() {
         text,
         createdAt: message?.created_at || new Date().toISOString()
       };
-      setConversations((items) => items.map((item) => item.id === selected.id ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item));
-      setSelected((item) => item ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item);
+      setConversations((items) => items.map((item) => item.id === selectedConversationId ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item));
+      setSelected((item) => item?.id === selectedConversationId ? { ...item, lastMessage: text, messages: [...item.messages, nextMessage] } : item);
       setBody('');
       setError('');
     } catch (sendError) {
@@ -586,7 +587,12 @@ export function GuideMessages() {
             {error && <p className="form-error">{error}</p>}
             <button className="primary-button" onClick={sendReply}>전송</button>
           </>
-        ) : <p>대화를 선택하세요.</p>}
+        ) : (
+          <>
+            <p>대화를 선택하세요.</p>
+            {error && <p className="form-error">{error}</p>}
+          </>
+        )}
       </aside>
     </div>
   );

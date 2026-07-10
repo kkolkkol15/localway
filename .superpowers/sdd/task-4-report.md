@@ -77,3 +77,29 @@ DONE
 
 - Intended commit message:
   - `Show real admin message conversations`
+
+---
+
+## Review Fixes: 2026-07-10
+
+### Fixed findings
+
+- Captured the selected conversation id at reply-send time in `GuideMessages` and used that stable id for both the API call and local state reconciliation.
+- Changed the post-send `setSelected(...)` update so it only patches the currently selected thread when its id still matches the conversation that initiated the send.
+- Rendered the existing load error in the no-selection empty state so failed conversation loads are visible even when no thread is selected.
+
+### Testability note
+
+- I did not add a UI regression test for the thread-switch race because `apps/admin` currently has no component or DOM test harness; its test surface is limited to `node --test` unit tests for store/API modules under `apps/admin/src/tests`.
+
+### Verification
+
+- `pnpm --dir apps/admin test`
+  - PASS (`34` tests passed)
+- `pnpm --dir apps/admin build`
+  - PASS
+  - Existing non-blocking Vite chunk-size warning remains for the generated JS bundle.
+
+### Commit for review fixes
+
+- `Fix admin message thread state handling`
