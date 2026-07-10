@@ -334,9 +334,103 @@ export function TourManagement() {
         { key: 'createdAt', label: '등록일', sortable: true }, { key: 'bookings', label: '예약 건수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
         { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>{['활성', 'active'].includes(row.status) ? <ActionButton icon={Pause} onClick={() => setPause(row)}>정지</ActionButton> : <ActionButton icon={Play} tone="primary" onClick={() => resumeTour(row)}>재개</ActionButton>}</div> }
       ]} />
-      {selected && <Modal title="투어 상세" onClose={() => setSelected(null)} wide><div className="detail-grid"><img src={selected.thumbnail} alt="" /><div><h3>{selected.title}</h3><p>{selected.description}</p><p>{selected.price} · {selected.options}</p></div></div></Modal>}
+      {selected && <TourDetailModal tour={selected} onClose={() => setSelected(null)} />}
       {pause && <ReasonModal title="투어 일시 정지" onClose={() => setPause(null)} onSubmit={(reason) => pauseTour(pause, reason)} />}
     </>
+  );
+}
+
+function TourDetailModal({ tour, onClose }) {
+  const summaryRows = [
+    ['도시', tour.city || '미입력'],
+    ['유형', tour.type || '미입력'],
+    ['가이드', tour.guide || '미입력'],
+    ['등록일', tour.createdAt ? new Date(tour.createdAt).toLocaleDateString('ko-KR') : '미입력']
+  ];
+  const metrics = [
+    ['가격', tour.priceLabel || tour.price || '미입력'],
+    ['소요 시간', tour.durationLabel || '미입력'],
+    ['최대 인원', tour.maxPeopleLabel || '미입력'],
+    ['예약 건수', `${tour.bookings ?? 0}건`]
+  ];
+  const detailRows = [
+    ['결제 방식', tour.paymentTypeLabel || '미입력'],
+    ['통화', tour.currency || '미입력'],
+    ['상태', tour.status || '미입력']
+  ];
+
+  return (
+    <Modal title="투어 상세" onClose={onClose} wide>
+      <div className="tour-detail-shell">
+        <section className="tour-detail-hero">
+          <div className="tour-detail-image-frame">
+            {tour.hasImage || tour.thumbnail ? <img src={tour.thumbnail} alt={tour.title || '투어 이미지'} /> : <div className="tour-detail-image-empty">이미지 없음</div>}
+          </div>
+          <div className="tour-detail-header">
+            <div className="tour-detail-title-row">
+              <h3>{tour.title || '제목 없는 투어'}</h3>
+              <StatusBadge value={tour.status} />
+            </div>
+            <dl className="tour-detail-summary">
+              {summaryRows.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+
+        <section className="tour-detail-metrics" aria-label="투어 핵심 지표">
+          {metrics.map(([label, value]) => (
+            <article key={label} className="tour-detail-metric">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </article>
+          ))}
+        </section>
+
+        <section className="tour-detail-body">
+          <article className="tour-detail-panel tour-detail-description">
+            <h4>설명</h4>
+            <p>{tour.detailText || tour.description || '상세 설명이 없습니다.'}</p>
+          </article>
+          <aside className="tour-detail-panel">
+            <h4>세부 정보</h4>
+            <dl className="tour-detail-info-list">
+              {detailRows.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </aside>
+        </section>
+
+        <section className="tour-detail-panel tour-detail-extra">
+          <div>
+            <h4>옵션</h4>
+            <ChipList items={tour.optionLabels} emptyText="옵션 없음" />
+          </div>
+          <div>
+            <h4>이동수단</h4>
+            <ChipList items={tour.transportLabels} emptyText="미입력" />
+          </div>
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
+function ChipList({ items = [], emptyText }) {
+  const visibleItems = items.filter(Boolean);
+  if (!visibleItems.length) return <p className="tour-detail-empty">{emptyText}</p>;
+  return (
+    <div className="tour-detail-chip-list">
+      {visibleItems.map((item) => <span key={item} className="tour-detail-chip">{item}</span>)}
+    </div>
   );
 }
 

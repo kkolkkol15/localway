@@ -14,6 +14,7 @@ import {
   findOrCreateAdminConversation,
   mapProfileToAdminMember,
   mapConversationToAdminThread,
+  mapTourToAdminRow,
   sendAdminMemberMessage,
   updateTourStatus
 } from '../lib/adminDataApi.js';
@@ -421,6 +422,60 @@ test('createSupabaseRestClient count reads exact total from Content-Range', asyn
   assert.equal(count, 42);
   assert.equal(requests[0][0], 'https://example.supabase.co/rest/v1/profiles?select=id&role=eq.traveler');
   assert.equal(requests[0][1].headers.Prefer, 'count=exact');
+});
+
+test('mapTourToAdminRow preserves detailed tour fields for the admin detail modal', () => {
+  const row = mapTourToAdminRow({
+    id: 'tour-1',
+    title: '반석천 조류 탐방 투어',
+    city: '대전',
+    type: '자연',
+    status: 'active',
+    created_at: '2026-07-10T09:00:00Z',
+    description: '짧은 소개',
+    content_html: '<p>자전거를 타고 <strong>반석천</strong>을 탐방합니다.</p>',
+    price_amount: 60000,
+    currency: 'KRW',
+    payment_type: 'pay_now',
+    duration_minutes: 120,
+    max_people: 6,
+    transport: ['자전거', '도보'],
+    options: { bicycle: true, meal: false, cafe: true },
+    guide_profiles: { display_name: 'kyeong kim' },
+    tour_images: [
+      { image_path: 'second.jpg', sort_order: 2 },
+      { image_path: 'first.jpg', sort_order: 1 }
+    ],
+    reservations: [{ id: 'reservation-1' }, { id: 'reservation-2' }]
+  });
+
+  assert.equal(row.thumbnail, 'first.jpg');
+  assert.equal(row.detailText, '자전거를 타고 반석천을 탐방합니다.');
+  assert.equal(row.priceLabel, 'KRW 60,000');
+  assert.equal(row.durationLabel, '2시간');
+  assert.equal(row.maxPeopleLabel, '6명');
+  assert.equal(row.paymentTypeLabel, '즉시 결제');
+  assert.deepEqual(row.optionLabels, ['bicycle', 'cafe']);
+  assert.deepEqual(row.transportLabels, ['자전거', '도보']);
+  assert.equal(row.bookings, 2);
+});
+
+test('mapTourToAdminRow supplies readable fallbacks for sparse tour detail data', () => {
+  const row = mapTourToAdminRow({
+    id: 'tour-empty',
+    title: '정보 부족 투어',
+    guide_profiles: {}
+  });
+
+  assert.equal(row.thumbnail, '');
+  assert.equal(row.detailText, '상세 설명이 없습니다.');
+  assert.equal(row.priceLabel, 'USD 0');
+  assert.equal(row.durationLabel, '미입력');
+  assert.equal(row.maxPeopleLabel, '미입력');
+  assert.equal(row.paymentTypeLabel, '미입력');
+  assert.deepEqual(row.optionLabels, []);
+  assert.deepEqual(row.transportLabels, []);
+  assert.equal(row.hasImage, false);
 });
 
 test('updateTourStatus patches an existing tour status', async () => {

@@ -11,6 +11,70 @@ function asAdminStatus(status) {
   return normalized;
 }
 
+function compactText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function decodeHtmlEntities(value) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function htmlToText(value) {
+  return compactText(decodeHtmlEntities(String(value ?? '')
+    .replace(/<(br|\/p|\/div|\/li)\b[^>]*>/gi, ' ')
+    .replace(/<[^>]*>/g, '')));
+}
+
+function formatPrice(currency, amount) {
+  const code = compactText(currency || 'USD') || 'USD';
+  const numeric = Number(amount ?? 0);
+  const formatted = Number.isFinite(numeric) ? new Intl.NumberFormat('en-US').format(numeric) : '0';
+  return `${code} ${formatted}`;
+}
+
+function formatDuration(minutes) {
+  const numeric = Number(minutes);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '미입력';
+  const hours = Math.floor(numeric / 60);
+  const remainingMinutes = numeric % 60;
+  if (hours && remainingMinutes) return `${hours}시간 ${remainingMinutes}분`;
+  if (hours) return `${hours}시간`;
+  return `${remainingMinutes}분`;
+}
+
+function formatPeople(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '미입력';
+  return `${numeric}명`;
+}
+
+function formatPaymentType(value) {
+  const normalized = compactText(value);
+  const labels = {
+    pay_now: '즉시 결제',
+    prepaid: '즉시 결제',
+    pay_later: '현장 결제',
+    onsite: '현장 결제',
+    free: '무료'
+  };
+  return labels[normalized] || normalized || '미입력';
+}
+
+function normalizeList(value) {
+  if (Array.isArray(value)) return value.map(compactText).filter(Boolean);
+  if (typeof value === 'string') return value.split(',').map(compactText).filter(Boolean);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).filter((key) => value[key]);
+  }
+  return [];
+}
+
 export function buildAdminConversationRow({ adminId, memberId, title = '운영팀 메시지' }) {
   return {
     type: 'admin',
@@ -105,19 +169,42 @@ export function mapGuideProfileToAdminGuide(profile = {}) {
 }
 
 export function mapTourToAdminRow(tour = {}) {
+  const images = [...(tour.tour_images ?? [])]
+    .filter((image) => image?.image_path)
+    .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+  const optionLabels = normalizeList(tour.options);
+  const transportLabels = normalizeList(tour.transport);
+  const detailText = htmlToText(tour.content_html) || compactText(tour.description) || '상세 설명이 없습니다.';
+  const priceLabel = formatPrice(tour.currency, tour.price_amount);
+
   return {
     id: tour.id,
     title: tour.title,
     guide: tour.guide_profiles?.display_name || '',
-    city: tour.city,
-    type: tour.type,
-    thumbnail: tour.tour_images?.[0]?.image_path || '',
+    city: tour.city || '',
+    type: tour.type || '',
+    thumbnail: images[0]?.image_path || '',
+    gallery: images.map((image) => image.image_path),
+    hasImage: Boolean(images[0]?.image_path),
     createdAt: tour.created_at || '',
     bookings: tour.reservations?.length ?? 0,
-    status: tour.status,
-    description: tour.description,
-    price: `${tour.currency || 'USD'} ${tour.price_amount ?? 0}`,
-    options: tour.options ? Object.keys(tour.options).filter((key) => tour.options[key]).join(', ') : ''
+    status: tour.status || '',
+    description: compactText(tour.description),
+    contentHtml: tour.content_html || '',
+    detailText,
+    priceAmount: tour.price_amount ?? 0,
+    currency: tour.currency || 'USD',
+    price: priceLabel,
+    priceLabel,
+    paymentType: tour.payment_type || '',
+    paymentTypeLabel: formatPaymentType(tour.payment_type),
+    durationMinutes: tour.duration_minutes ?? null,
+    durationLabel: formatDuration(tour.duration_minutes),
+    maxPeople: tour.max_people ?? null,
+    maxPeopleLabel: formatPeople(tour.max_people),
+    options: optionLabels.join(', '),
+    optionLabels,
+    transportLabels
   };
 }
 
