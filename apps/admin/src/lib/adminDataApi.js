@@ -145,6 +145,16 @@ export function buildMemberMessagePayload(member = {}) {
   };
 }
 
+export function buildAdminMemberMessageRequest({ adminId, target = {}, title, body }) {
+  return {
+    adminId,
+    memberId: target.userId || target.id,
+    title,
+    body,
+    logTarget: target.name || target.email || '회원'
+  };
+}
+
 export async function fetchAdminMembers(client) {
   const profiles = await client.request('profiles', {
     query: '?select=id,email,display_name,role,is_guide,status,created_at'

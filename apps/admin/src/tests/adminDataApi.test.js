@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildAdminConversationRow,
+  buildAdminMemberMessageRequest,
   buildConversationMessageRow,
   buildNoticeRow,
   buildPlatformSettingRow,
@@ -326,6 +327,45 @@ test('mapProfileToAdminMember preserves member id for direct messages', () => {
     email: 'mina@example.com',
     role: 'traveler'
   }).id, 'member-1');
+});
+
+test('buildAdminMemberMessageRequest uses guide user id and preserves admin sender', () => {
+  assert.deepEqual(buildAdminMemberMessageRequest({
+    adminId: 'admin-7',
+    target: {
+      id: 'guide-profile-1',
+      userId: 'member-7',
+      name: 'Guide Mina',
+      email: 'guide@example.com'
+    },
+    title: '운영팀 안내',
+    body: '확인 부탁드립니다.'
+  }), {
+    adminId: 'admin-7',
+    memberId: 'member-7',
+    title: '운영팀 안내',
+    body: '확인 부탁드립니다.',
+    logTarget: 'Guide Mina'
+  });
+});
+
+test('buildAdminMemberMessageRequest falls back to traveler id and email log target', () => {
+  assert.deepEqual(buildAdminMemberMessageRequest({
+    adminId: 'admin-8',
+    target: {
+      id: 'member-8',
+      name: '',
+      email: 'traveler@example.com'
+    },
+    title: '계정 안내',
+    body: '메시지 본문'
+  }), {
+    adminId: 'admin-8',
+    memberId: 'member-8',
+    title: '계정 안내',
+    body: '메시지 본문',
+    logTarget: 'traveler@example.com'
+  });
 });
 
 test('buildMemberMessagePayload targets an individual member by display name', () => {

@@ -13,6 +13,7 @@ import {
   rejectGuideApplication
 } from '../lib/guideApplicationsApi.js';
 import {
+  buildAdminMemberMessageRequest,
   createNotice,
   createPlatformSetting,
   deleteNotice,
@@ -226,13 +227,14 @@ export function MemberManagement() {
   const sendMemberMessage = async ({ title, body }) => {
     if (!messageTarget) return;
     try {
-      await sendAdminMemberMessage(client, {
+      const request = buildAdminMemberMessageRequest({
         adminId: state.auth.admin?.id,
-        memberId: messageTarget.userId || messageTarget.id,
+        target: messageTarget,
         title,
         body
       });
-      dispatch({ type: 'SEND_MESSAGE', payload: { target: messageTarget.name, title, body } });
+      await sendAdminMemberMessage(client, request);
+      dispatch({ type: 'SEND_MESSAGE', payload: { target: request.logTarget, title: request.title, body: request.body } });
       setMessageTarget(null);
       setMessageError('');
     } catch (error) {
