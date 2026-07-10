@@ -19,44 +19,10 @@ import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuidePr
 const today = new Date().toISOString().slice(0, 10);
 const messageCategories = [
   { id: 'all', label: '전체' },
+  { id: 'admin', label: '운영팀' },
   { id: 'travel', label: '여행' },
   { id: 'guiding', label: '가이딩' },
   { id: 'support', label: '지원' }
-];
-const mockConversations = [
-  {
-    id: 'mock-guiding-application',
-    type: 'guiding',
-    guideName: 'Guide Team',
-    avatar: 'https://picsum.photos/seed/local-way-message-guiding/120/120',
-    lastMessage: '가이드 프로필 보완 안내를 확인해주세요.',
-    messages: [
-      { from: 'guide', text: '가이드 지원서의 자기소개를 조금 더 자세히 작성해주세요.' },
-      { from: 'me', text: '오늘 중으로 수정하겠습니다.' }
-    ]
-  },
-  {
-    id: 'mock-support-refund',
-    type: 'support',
-    guideName: 'Customer Support',
-    avatar: 'https://picsum.photos/seed/local-way-message-support/120/120',
-    lastMessage: '환불 정책 문의에 대한 답변이 등록되었습니다.',
-    messages: [
-      { from: 'guide', text: '문의주신 예약은 무료 취소 기간 내에 있습니다.' },
-      { from: 'me', text: '확인 감사합니다.' }
-    ]
-  },
-  {
-    id: 'mock-travel-seoul',
-    type: 'travel',
-    guideName: 'Minji',
-    avatar: 'https://picsum.photos/seed/local-way-message-travel/120/120',
-    lastMessage: '내일 북촌 투어 만나는 장소를 보내드렸어요.',
-    messages: [
-      { from: 'guide', text: '내일 북촌 투어는 안국역 2번 출구에서 시작합니다.' },
-      { from: 'me', text: '좋아요. 10분 전에 도착할게요.' }
-    ]
-  }
 ];
 const guideLanguageOptions = [
   '아프리칸스어', '알바니아어', '암하라어', '아랍어', '아르메니아어', '아제르바이잔어', '바스크어', '벨라루스어', '벵골어', '보스니아어',
@@ -2184,8 +2150,12 @@ export function MessagesPage() {
   const allConversations = useMemo(
     () => [
       ...remoteConversations,
-      ...state.conversations.map((conversation) => ({ ...conversation, type: conversation.type ?? 'travel' })),
-      ...mockConversations
+      ...state.conversations.map((conversation) => ({
+        ...conversation,
+        type: conversation.type ?? 'travel',
+        displayName: conversation.guideName,
+        replyEnabled: true
+      }))
     ],
     [remoteConversations, state.conversations]
   );
@@ -2206,17 +2176,7 @@ export function MessagesPage() {
       try {
         const client = await createBrowserSupabaseClient();
         const rows = await fetchConversations(client, state.auth.user.id);
-        const mapped = rows.map((conversation) => ({
-          id: conversation.id,
-          type: conversation.type ?? 'travel',
-          guideName: conversation.title || conversation.last_message || 'Conversation',
-          avatar: '',
-          lastMessage: conversation.last_message || '',
-          messages: [...(conversation.conversation_messages ?? [])]
-            .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
-            .map((message) => ({ from: message.sender_id === state.auth.user.id ? 'me' : 'them', text: message.body }))
-        }));
-        if (active) setRemoteConversations(mapped);
+        if (active) setRemoteConversations(rows);
       } catch {
         if (active) setRemoteConversations([]);
       }
@@ -2229,6 +2189,7 @@ export function MessagesPage() {
 
   const sendMessage = async () => {
     if (!text.trim() || !selected) return;
+    if (!selected.replyEnabled) return;
     try {
       if (getSupabaseConfig().isConfigured && !selected.id.startsWith('mock-') && state.auth.user?.id) {
         await sendConversationMessage(await createBrowserSupabaseClient(), {
@@ -2248,7 +2209,7 @@ export function MessagesPage() {
     <main className="mx-auto grid h-[calc(100dvh-73px)] w-full max-w-7xl gap-2 overflow-hidden px-4 sm:px-6 md:grid-cols-[340px_1fr]">
       <aside className="flex min-h-0 flex-col rounded-card bg-white p-2 shadow-soft">
         <h1 className="px-2 py-2 text-2xl font-black">Messages</h1>
-        <div className="mb-2 grid grid-cols-4 gap-1 rounded-full bg-zinc-100 p-1">
+        <div className="mb-2 grid grid-cols-5 gap-1 rounded-full bg-zinc-100 p-1">
           {messageCategories.map((category) => (
             <button
               className={`min-h-10 rounded-full px-3 text-sm font-black ${activeCategory === category.id ? 'bg-primary text-white shadow-soft' : 'text-zinc-600 hover:bg-white'}`}
@@ -2267,7 +2228,11 @@ export function MessagesPage() {
               onClick={() => setSelected(conversation)}
               key={conversation.id}
             >
-              <img className="h-12 w-12 rounded-full object-cover" src={conversation.avatar} alt="" />
+              {conversation.avatar ? (
+                <img className="h-12 w-12 rounded-full object-cover" src={conversation.avatar} alt="" />
+              ) : (
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-orange-100 text-sm font-black text-primary">LW</span>
+              )}
               <span className="min-w-0">
                 <span className="flex items-center gap-2">
                   <b>{conversation.guideName}</b>
@@ -2295,18 +2260,24 @@ export function MessagesPage() {
                 </div>
               ))}
             </div>
-            <div className="message-composer">
-              <input
-                className="message-composer-input"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') sendMessage(); }}
-                placeholder="메시지를 입력하세요"
-              />
-              <button className="message-send-button" onClick={sendMessage} disabled={!text.trim()} aria-label="Send message">
-                <Send size={21} />
-              </button>
-            </div>
+            {selected.replyEnabled ? (
+              <div className="message-composer">
+                <input
+                  className="message-composer-input"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') sendMessage(); }}
+                  placeholder="메시지를 입력하세요"
+                />
+                <button className="message-send-button" onClick={sendMessage} disabled={!text.trim()} aria-label="Send message">
+                  <Send size={21} />
+                </button>
+              </div>
+            ) : (
+              <div className="message-composer">
+                <p className="text-sm font-semibold text-zinc-500">답장할 수 없는 안내 메시지입니다.</p>
+              </div>
+            )}
           </>
         ) : <p>Select a conversation</p>}
       </section>
