@@ -16,7 +16,6 @@ import {
   createNotice,
   createPlatformSetting,
   deleteNotice,
-  buildMemberMessagePayload,
   fetchAdminMembers,
   fetchAdminReviews,
   fetchAdminTours,
@@ -24,6 +23,7 @@ import {
   fetchPlatformSettings,
   fetchSupportTickets,
   replyToSupportTicket,
+  sendAdminMemberMessage,
   updateReviewStatus,
   updateTourStatus
 } from '../lib/adminDataApi.js';
@@ -206,6 +206,8 @@ export function MemberManagement() {
   const [tab, setTab] = useState('travelers');
   const [selected, setSelected] = useState(null);
   const [action, setAction] = useState(null);
+  const [messageTarget, setMessageTarget] = useState(null);
+  const [messageError, setMessageError] = useState('');
   const [remoteMembers, setRemoteMembers] = useState({ travelers: [], guides: [], stats: { travelers: null, guides: null }, statsError: '', integrityWarnings: [] });
   const config = getSupabaseAdminConfig();
   const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
@@ -221,14 +223,30 @@ export function MemberManagement() {
   }, [client]);
   const rows = isTraveler ? (remoteMembers.travelers.length ? remoteMembers.travelers : state.travelers) : (remoteMembers.guides.length ? remoteMembers.guides : state.guides);
   const stats = remoteMembers.stats ?? { travelers: null, guides: null };
+  const sendMemberMessage = async ({ title, body }) => {
+    if (!messageTarget) return;
+    try {
+      await sendAdminMemberMessage(client, {
+        adminId: state.auth.admin?.id,
+        memberId: messageTarget.userId || messageTarget.id,
+        title,
+        body
+      });
+      dispatch({ type: 'SEND_MESSAGE', payload: { target: messageTarget.name, title, body } });
+      setMessageTarget(null);
+      setMessageError('');
+    } catch (error) {
+      setMessageError(error.message || '메시지 전송에 실패했습니다.');
+    }
+  };
   const columns = isTraveler ? [
     { key: 'name', label: '이름', sortable: true }, { key: 'email', label: '이메일', sortable: true }, { key: 'joinedAt', label: '가입일', sortable: true },
     { key: 'bookings', label: '총 예약 수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: row.status === '벤' ? 'UNBAN_TRAVELER' : 'BAN_TRAVELER', row })}>{row.status === '벤' ? '해제' : '벤'}</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => dispatch({ type: 'SEND_MESSAGE', payload: buildMemberMessagePayload(row) })}>메시지</ActionButton></div> }
+    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: row.status === '벤' ? 'UNBAN_TRAVELER' : 'BAN_TRAVELER', row })}>{row.status === '벤' ? '해제' : '벤'}</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => { setMessageTarget(row); setMessageError(''); }}>메시지</ActionButton></div> }
   ] : [
     { key: 'name', label: '이름', sortable: true }, { key: 'city', label: '거주 도시', sortable: true }, { key: 'rating', label: '평점', sortable: true }, { key: 'tours', label: '등록 투어 수', sortable: true },
     { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: 'BAN_GUIDE', row })}>벤</ActionButton><ActionButton icon={Pause} onClick={() => setAction({ type: 'SUSPEND_GUIDE', row })}>정지</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => dispatch({ type: 'SEND_MESSAGE', payload: buildMemberMessagePayload(row) })}>메시지</ActionButton></div> }
+    { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton><ActionButton icon={Ban} onClick={() => setAction({ type: 'BAN_GUIDE', row })}>벤</ActionButton><ActionButton icon={Pause} onClick={() => setAction({ type: 'SUSPEND_GUIDE', row })}>정지</ActionButton><ActionButton icon={Send} tone="primary" onClick={() => { setMessageTarget(row); setMessageError(''); }}>메시지</ActionButton></div> }
   ];
   return (
     <>
@@ -242,7 +260,33 @@ export function MemberManagement() {
       <DataTable rows={rows} columns={columns} searchPlaceholder="회원 검색" />
       {selected && <Modal title="회원 상세" onClose={() => setSelected(null)} wide><div className="stack"><h3>{selected.name}</h3><p>{selected.profile ?? selected.email}</p><p>{selected.settlement ?? `예약 이력: ${selected.history?.join(', ')}`}</p><p>후기: {selected.reviews?.join(', ') ?? '등록 투어 리스트와 정산 정보를 확인할 수 있습니다.'}</p></div></Modal>}
       {action && <ReasonModal title="회원 상태 변경" label={action.type === 'SUSPEND_GUIDE' ? '정지 기간 또는 사유' : '사유'} onClose={() => setAction(null)} onSubmit={(reason) => dispatch({ type: action.type, payload: { id: action.row.id, reason, period: reason } })} />}
+      {messageTarget && (
+        <MessageModal
+          target={messageTarget}
+          error={messageError}
+          onClose={() => setMessageTarget(null)}
+          onSubmit={sendMemberMessage}
+        />
+      )}
     </>
+  );
+}
+
+function MessageModal({ target, error, onClose, onSubmit }) {
+  return (
+    <Modal title="회원에게 메시지 보내기" onClose={onClose}>
+      <form className="stack" onSubmit={(event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        onSubmit({ title: form.get('title'), body: form.get('body') });
+      }}>
+        <p className="muted">수신자: {target.name || target.email}</p>
+        <label>제목<input name="title" defaultValue="운영팀 메시지" required /></label>
+        <label>내용<textarea name="body" required /></label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" type="submit"><Send size={17} />전송</button>
+      </form>
+    </Modal>
   );
 }
 

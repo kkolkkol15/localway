@@ -11,6 +11,7 @@ import {
   fetchAdminConversations,
   fetchAdminMembers,
   findOrCreateAdminConversation,
+  mapProfileToAdminMember,
   mapConversationToAdminThread,
   sendAdminMemberMessage,
   updateTourStatus
@@ -316,6 +317,15 @@ test('buildMemberIntegrityWarnings reports broken guide membership invariants', 
     '1명의 가이드 회원에 is_guide가 설정되어 있지 않습니다.',
     '일반 가이드 수가 여행객/회원 수보다 많습니다.'
   ]);
+});
+
+test('mapProfileToAdminMember preserves member id for direct messages', () => {
+  assert.equal(mapProfileToAdminMember({
+    id: 'member-1',
+    display_name: 'Mina',
+    email: 'mina@example.com',
+    role: 'traveler'
+  }).id, 'member-1');
 });
 
 test('buildMemberMessagePayload targets an individual member by display name', () => {
