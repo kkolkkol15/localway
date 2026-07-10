@@ -2383,6 +2383,45 @@
     color: #18181b;
   }
 
+  .message-category-filter {
+    min-height: 40px;
+    border-radius: 999px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    word-break: keep-all;
+  }
+
+  .message-conversation-title-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .message-conversation-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: keep-all;
+  }
+
+  .message-category-badge {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #f4f4f5;
+    padding: 2px 8px;
+    color: #71717a;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 16px;
+    white-space: nowrap;
+    word-break: keep-all;
+  }
+
   .message-composer {
     position: sticky;
     bottom: 0;

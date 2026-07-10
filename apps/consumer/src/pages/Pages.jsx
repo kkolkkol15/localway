@@ -2212,7 +2212,7 @@ export function MessagesPage() {
         <div className="mb-2 grid grid-cols-5 gap-1 rounded-full bg-zinc-100 p-1">
           {messageCategories.map((category) => (
             <button
-              className={`min-h-10 rounded-full px-3 text-sm font-black ${activeCategory === category.id ? 'bg-primary text-white shadow-soft' : 'text-zinc-600 hover:bg-white'}`}
+              className={`message-category-filter ${activeCategory === category.id ? 'bg-primary text-white shadow-soft' : 'text-zinc-600 hover:bg-white'}`}
               type="button"
               onClick={() => setActiveCategory(category.id)}
               key={category.id}
@@ -2233,10 +2233,10 @@ export function MessagesPage() {
               ) : (
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-orange-100 text-sm font-black text-primary">LW</span>
               )}
-              <span className="min-w-0">
-                <span className="flex items-center gap-2">
-                  <b>{conversation.guideName}</b>
-                  <small className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-black text-zinc-500">{messageCategories.find((category) => category.id === conversation.type)?.label}</small>
+              <span className="min-w-0 flex-1">
+                <span className="message-conversation-title-row">
+                  <b className="message-conversation-name">{conversation.guideName}</b>
+                  <small className="message-category-badge">{messageCategories.find((category) => category.id === conversation.type)?.label}</small>
                 </span>
                 <small className="line-clamp-2 block text-zinc-500">{conversation.lastMessage}</small>
               </span>
