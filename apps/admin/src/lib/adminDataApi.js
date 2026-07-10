@@ -11,6 +11,48 @@ function asAdminStatus(status) {
   return normalized;
 }
 
+export function buildAdminConversationRow({ adminId, memberId, title = '운영팀 메시지' }) {
+  return {
+    type: 'admin',
+    participant_id: requireText(memberId, 'A member id is required.'),
+    created_by: requireText(adminId, 'An admin id is required.'),
+    title: requireText(title || '운영팀 메시지', 'A conversation title is required.'),
+    reply_enabled: true,
+    last_message: ''
+  };
+}
+
+export function buildConversationMessageRow({ conversationId, senderId, body }) {
+  return {
+    conversation_id: requireText(conversationId, 'A conversation id is required.'),
+    sender_id: requireText(senderId, 'A sender id is required.'),
+    body: requireText(body, 'A message body is required.')
+  };
+}
+
+export function mapConversationToAdminThread(conversation = {}) {
+  const messages = [...(conversation.conversation_messages ?? [])]
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .map((message) => ({
+      id: message.id,
+      senderId: message.sender_id,
+      text: message.body,
+      createdAt: message.created_at || ''
+    }));
+  return {
+    id: conversation.id,
+    type: conversation.type || 'admin',
+    title: conversation.title || '운영팀 메시지',
+    memberId: conversation.participant_id || '',
+    memberName: conversation.profiles?.display_name || conversation.profiles?.email || '회원',
+    memberEmail: conversation.profiles?.email || '',
+    lastMessage: conversation.last_message || '',
+    replyEnabled: conversation.reply_enabled !== false,
+    updatedAt: conversation.updated_at || conversation.created_at || '',
+    messages
+  };
+}
+
 export function buildNoticeRow({ adminId, payload = {} }) {
   return {
     title: requireText(payload.title, 'Notice title and content are required.'),
@@ -124,6 +166,49 @@ export async function fetchAdminMembers(client) {
     },
     integrityWarnings: buildMemberIntegrityWarnings({ profiles, guideProfiles, travelerCount })
   };
+}
+
+export async function findOrCreateAdminConversation(client, { adminId, memberId, title = '운영팀 메시지' }) {
+  const query = `?select=*&type=eq.admin&participant_id=eq.${encodeURIComponent(requireText(memberId, 'A member id is required.'))}&limit=1`;
+  const existing = await client.request('conversations', { query });
+  if (existing[0]) return existing[0];
+
+  const created = await client.request('conversations', {
+    method: 'POST',
+    body: buildAdminConversationRow({ adminId, memberId, title })
+  });
+  return created[0] ?? null;
+}
+
+export async function sendAdminConversationMessage(client, { conversationId, senderId, body }) {
+  const message = buildConversationMessageRow({ conversationId, senderId, body });
+  const created = await client.request('conversation_messages', {
+    method: 'POST',
+    body: message
+  });
+  await client.request('conversations', {
+    method: 'PATCH',
+    query: `?id=eq.${encodeURIComponent(message.conversation_id)}`,
+    body: { last_message: message.body, updated_at: new Date().toISOString() }
+  });
+  return created[0] ?? null;
+}
+
+export async function sendAdminMemberMessage(client, { adminId, memberId, title = '운영팀 메시지', body }) {
+  const conversation = await findOrCreateAdminConversation(client, { adminId, memberId, title });
+  const message = await sendAdminConversationMessage(client, {
+    conversationId: conversation.id,
+    senderId: adminId,
+    body
+  });
+  return { conversation, message };
+}
+
+export async function fetchAdminConversations(client) {
+  const rows = await client.request('conversations', {
+    query: '?select=*,profiles!conversations_participant_id_fkey(display_name,email),conversation_messages(*)&type=eq.admin&order=updated_at.desc'
+  });
+  return rows.map(mapConversationToAdminThread);
 }
 
 export async function fetchAdminTours(client) {

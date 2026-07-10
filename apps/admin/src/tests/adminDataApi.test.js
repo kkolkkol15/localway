@@ -1,15 +1,79 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildAdminConversationRow,
+  buildConversationMessageRow,
   buildNoticeRow,
   buildPlatformSettingRow,
   buildSupportReplyPatch,
   buildMemberIntegrityWarnings,
   buildMemberMessagePayload,
   fetchAdminMembers,
+  sendAdminMemberMessage,
   updateTourStatus
 } from '../lib/adminDataApi.js';
 import { createSupabaseRestClient } from '../lib/guideApplicationsApi.js';
+
+test('buildAdminConversationRow creates a reusable admin member conversation', () => {
+  assert.deepEqual(buildAdminConversationRow({
+    adminId: 'admin-1',
+    memberId: 'member-1',
+    title: '계정 안내'
+  }), {
+    type: 'admin',
+    participant_id: 'member-1',
+    created_by: 'admin-1',
+    title: '계정 안내',
+    reply_enabled: true,
+    last_message: ''
+  });
+});
+
+test('buildConversationMessageRow maps sender and body for admin messages', () => {
+  assert.deepEqual(buildConversationMessageRow({
+    conversationId: 'conversation-1',
+    senderId: 'admin-1',
+    body: '확인 부탁드립니다.'
+  }), {
+    conversation_id: 'conversation-1',
+    sender_id: 'admin-1',
+    body: '확인 부탁드립니다.'
+  });
+});
+
+test('sendAdminMemberMessage reuses an existing admin conversation and inserts a message', async () => {
+  const calls = [];
+  const client = {
+    request: async (table, options = {}) => {
+      calls.push([table, options]);
+      if (table === 'conversations' && options.method !== 'PATCH') {
+        return [{ id: 'conversation-1', participant_id: 'member-1', title: '운영팀 메시지' }];
+      }
+      if (table === 'conversation_messages') {
+        return [{ id: 'message-1', body: options.body.body }];
+      }
+      return [{ id: 'conversation-1', last_message: options.body.last_message }];
+    }
+  };
+
+  const result = await sendAdminMemberMessage(client, {
+    adminId: 'admin-1',
+    memberId: 'member-1',
+    title: '운영팀 메시지',
+    body: '안녕하세요.'
+  });
+
+  assert.equal(result.conversation.id, 'conversation-1');
+  assert.equal(result.message.body, '안녕하세요.');
+  assert.deepEqual(calls.map(([table]) => table), ['conversations', 'conversation_messages', 'conversations']);
+  assert.match(calls[0][1].query, /type=eq\.admin/);
+  assert.match(calls[0][1].query, /participant_id=eq\.member-1/);
+  assert.deepEqual(calls[1][1].body, {
+    conversation_id: 'conversation-1',
+    sender_id: 'admin-1',
+    body: '안녕하세요.'
+  });
+});
 
 test('buildNoticeRow validates and maps notice form input', () => {
   assert.deepEqual(buildNoticeRow({
