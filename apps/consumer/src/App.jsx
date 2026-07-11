@@ -1,11 +1,12 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAppState } from './state/AppContext.jsx';
+import { MessageBadgeProvider } from './state/MessageBadgeContext.jsx';
 import { Header } from './components/Header.jsx';
 import { Footer } from './components/Footer.jsx';
 import { Toast } from './components/Toast.jsx';
 import {
   HomePage, SearchPage, TourDetailPage, PaymentPage, BookingSuccessPage, LoginPage,
-  GuideRegistrationPage, MyPage, GuideModePage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
+  GuideRegistrationPage, MyPage, GuideModePage, GuideMyToursPage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
   MessagesPage, PoliciesPage, SupportPage, MyBookingsPage, PastTripsPage,
   ReviewManagementPage, AccountSettingsPage, ViewProfilePage
 } from './pages/Pages.jsx';
@@ -28,8 +29,9 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-cream text-zinc-900">
-      <Header />
-      <div className="flex min-h-0 flex-1 flex-col">
+      <MessageBadgeProvider>
+        <Header />
+        <div className="flex min-h-0 flex-1 flex-col">
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
@@ -45,16 +47,19 @@ export default function App() {
           <Route path="/mypage/settings" element={<ProtectedRoute><AccountSettingsPage /></ProtectedRoute>} />
           <Route path="/mypage/profile" element={<ProtectedRoute><ViewProfilePage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode" element={<ProtectedRoute><GuideModePage /></ProtectedRoute>} />
+          <Route path="/mypage/guide-mode/tours" element={<ProtectedRoute guideOnly><GuideMyToursPage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/payments" element={<ProtectedRoute><GuidePaymentsPage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/new" element={<ProtectedRoute guideOnly><TourCreatePage /></ProtectedRoute>} />
+          <Route path="/mypage/guide-mode/tours/:tourId/edit" element={<ProtectedRoute guideOnly><TourCreatePage /></ProtectedRoute>} />
           <Route path="/bookmarks" element={<ProtectedRoute><BookmarksPage /></ProtectedRoute>} />
           <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/support" element={<ProtectedRoute><SupportPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </div>
-      {!isMessagesPage && <Footer />}
+        </div>
+        {!isMessagesPage && <Footer />}
+      </MessageBadgeProvider>
       <Toast />
     </div>
   );

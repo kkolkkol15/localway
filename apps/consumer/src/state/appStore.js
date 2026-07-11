@@ -262,8 +262,10 @@ export function appReducer(state, action) {
         },
         'Draft saved'
       );
-    case 'PUBLISH_TOUR':
-      return toast({ ...state, drafts: state.drafts.filter((draft) => draft.id !== action.payload.draftId) }, 'Tour published');
+    case 'PUBLISH_TOUR': {
+      const publishedDraftId = action.payload.draftId ?? action.payload.id;
+      return toast({ ...state, drafts: state.drafts.filter((draft) => draft.id !== publishedDraftId) }, 'Tour published');
+    }
     case 'SUBMIT_SUPPORT':
       return toast({ ...state, inquiries: [{ id: `inq-${Date.now()}`, status: 'Open', ...action.payload }, ...state.inquiries] }, 'Request submitted');
     default:

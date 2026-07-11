@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { alerts } from '../data/mockData.js';
 import { useAppState } from '../state/AppContext.jsx';
+import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
 import { isRegisteredGuideRole } from '../state/appStore.js';
+import { formatUnreadBadge } from '../lib/messageBadge.js';
 
 const languageRegions = [
   { code: 'ko', flag: '🇰🇷', language: '한국어', region: '대한민국', currency: 'KRW' },
@@ -61,6 +63,7 @@ const currencies = [
 export function Header() {
   const { t, i18n } = useTranslation();
   const { state, dispatch } = useAppState();
+  const { unreadCount } = useMessageBadge();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
   const [lang, setLang] = useState(false);
@@ -83,6 +86,7 @@ export function Header() {
   }
 
   const showGuideRegistration = !state.auth.isAuthenticated || !isRegisteredGuideRole(state.auth.user?.role, state.auth.user?.isGuide);
+  const messageBadge = formatUnreadBadge(unreadCount);
   const nav = (
     <>
       {showGuideRegistration && <button className="header-nav-item" onClick={() => goProtected('/register-guide')}>{t('nav.guide')}</button>}
@@ -106,7 +110,10 @@ export function Header() {
             {notice && <NotificationsPanel alerts={alerts} onClose={() => setNotice(false)} />}
           </div>
           <button className="icon-btn" onClick={() => goProtected('/bookmarks')} aria-label="Bookmarks"><Heart size={21} /></button>
-          <button className="icon-btn" onClick={() => goProtected('/messages')} aria-label="Messages"><Mail size={21} /></button>
+          <button className="icon-btn relative" onClick={() => goProtected('/messages')} aria-label="Messages">
+            <Mail size={21} />
+            {messageBadge && <span className="message-unread-badge">{messageBadge}</span>}
+          </button>
           <button className="icon-btn" onClick={() => setLang(true)} aria-label="Language and currency"><Globe2 size={21} /></button>
           {state.auth.isAuthenticated ? (
             <button className="ml-1 h-11 w-11 overflow-hidden rounded-full bg-primary text-cream" onClick={() => navigate('/mypage')} aria-label="Profile">

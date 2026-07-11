@@ -75,6 +75,147 @@ function normalizeList(value) {
   return [];
 }
 
+function normalizeGuideProfileDetail(profile = null) {
+  if (!profile) return null;
+  const [nativeLanguage = '', ...additionalLanguages] = profile.languages ?? [];
+  const settlements = profile.settlements ?? profile.settlementRows ?? [];
+  return {
+    id: profile.id,
+    userId: profile.user_id,
+    name: profile.display_name || 'Guide',
+    city: profile.city || '',
+    nationality: profile.nationality || '',
+    gender: profile.gender || '',
+    birthYear: profile.birth_year || '',
+    residenceYears: profile.residence_years ?? 0,
+    nativeLanguage,
+    additionalLanguages,
+    intro: profile.intro || '',
+    profileImagePath: profile.profile_image_path || '',
+    status: profile.status || 'active',
+    updatedAt: profile.updated_at || '',
+    metadata: profile.metadata ?? {},
+    tours: profile.tours?.length ?? 0,
+    activeTours: (profile.tours ?? []).filter((tour) => tour?.status === 'active').length,
+    settlements: settlements.length,
+    pendingSettlements: settlements.filter((settlement) => settlement?.status === 'pending').length
+  };
+}
+
+function latestByDate(items = [], keys = ['updated_at', 'created_at']) {
+  return [...items].sort((a, b) => {
+    const left = keys.map((key) => a?.[key]).find(Boolean) || '';
+    const right = keys.map((key) => b?.[key]).find(Boolean) || '';
+    return String(right).localeCompare(String(left));
+  })[0] ?? null;
+}
+
+function mapReservationActivity(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.tours?.title || row.title || '예약',
+    status: row.status || '',
+    date: row.reserved_date || row.created_at || '',
+    amount: row.amount ?? null,
+    currency: row.currency || ''
+  };
+}
+
+function mapReviewActivity(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.tours?.title || row.title || '후기',
+    rating: row.rating ?? null,
+    content: row.content || '',
+    status: row.status || '',
+    createdAt: row.created_at || ''
+  };
+}
+
+function mapTicketActivity(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    subject: row.subject || '문의',
+    status: row.status || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || ''
+  };
+}
+
+function mapBookmarkActivity(row = null) {
+  if (!row) return null;
+  return {
+    tourId: row.tour_id || '',
+    title: row.tours?.title || '저장한 투어',
+    createdAt: row.created_at || ''
+  };
+}
+
+function mapConversationActivity(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title || (row.type === 'admin' ? '운영팀 메시지' : '대화'),
+    lastMessage: row.last_message || '',
+    updatedAt: row.updated_at || row.created_at || ''
+  };
+}
+
+function buildActivitySummary(profile = {}) {
+  const reservations = profile.reservations ?? [];
+  const reviews = profile.reviews ?? [];
+  const supportTickets = profile.supportTickets ?? profile.support_tickets ?? [];
+  const bookmarks = profile.bookmarks ?? [];
+  const conversations = profile.conversations ?? [];
+  return {
+    reservations: {
+      total: reservations.length,
+      latest: mapReservationActivity(latestByDate(reservations, ['reserved_date', 'updated_at', 'created_at']))
+    },
+    reviews: {
+      total: reviews.length,
+      latest: mapReviewActivity(latestByDate(reviews))
+    },
+    supportTickets: {
+      total: supportTickets.length,
+      latest: mapTicketActivity(latestByDate(supportTickets))
+    },
+    bookmarks: {
+      total: bookmarks.length,
+      latest: mapBookmarkActivity(latestByDate(bookmarks, ['created_at']))
+    },
+    conversations: {
+      total: conversations.length,
+      latest: mapConversationActivity(latestByDate(conversations))
+    }
+  };
+}
+
+function mapRequestedTourPayload(payload = {}) {
+  return {
+    title: payload.title || '',
+    city: payload.city || '',
+    type: payload.type || '',
+    description: compactText(payload.description),
+    contentHtml: payload.content_html || '',
+    detailText: htmlToText(payload.content_html) || compactText(payload.description) || '상세 설명이 없습니다.',
+    priceAmount: payload.price_amount ?? 0,
+    currency: payload.currency || 'USD',
+    priceLabel: formatPrice(payload.currency, payload.price_amount),
+    paymentType: payload.payment_type || '',
+    paymentTypeLabel: formatPaymentType(payload.payment_type),
+    durationMinutes: payload.duration_minutes ?? null,
+    durationLabel: formatDuration(payload.duration_minutes),
+    maxPeople: payload.max_people ?? null,
+    maxPeopleLabel: formatPeople(payload.max_people),
+    optionLabels: normalizeList(payload.options),
+    transportLabels: normalizeList(payload.transport)
+  };
+}
+
 export function buildAdminConversationRow({ adminId, memberId, title = '운영팀 메시지' }) {
   return {
     type: 'admin',
@@ -143,28 +284,49 @@ export function buildPlatformSettingRow({ group, name, active = true, sortOrder 
 }
 
 export function mapProfileToAdminMember(profile = {}) {
+  const guideProfile = normalizeGuideProfileDetail(profile.guideProfile || profile.guide_profiles);
+  const activity = buildActivitySummary(profile);
   return {
     id: profile.id,
     name: profile.display_name || profile.email || 'Member',
     email: profile.email || '',
+    avatar: profile.avatar_path || '',
     role: profile.role || 'traveler',
     isGuide: Boolean(profile.is_guide),
     joinedAt: profile.created_at || '',
+    updatedAt: profile.updated_at || '',
     status: profile.status || 'active',
-    bookings: profile.reservations?.length ?? 0
+    bookings: profile.reservations?.length ?? 0,
+    metadata: profile.metadata ?? {},
+    accountSettings: profile.accountSettings || profile.account_settings || null,
+    activity,
+    guideProfile
   };
 }
 
 export function mapGuideProfileToAdminGuide(profile = {}) {
+  const detail = normalizeGuideProfileDetail(profile);
   return {
-    id: profile.id,
-    userId: profile.user_id,
-    name: profile.display_name || 'Guide',
-    city: profile.city || '',
+    id: detail?.id,
+    userId: detail?.userId,
+    name: detail?.name || 'Guide',
+    city: detail?.city || '',
     rating: Number(profile.rating_avg ?? 0),
-    tours: profile.tours?.length ?? 0,
-    status: profile.status || 'active',
-    profile: profile.intro || ''
+    tours: detail?.tours ?? 0,
+    status: detail?.status || 'active',
+    profile: detail?.intro || '',
+    detail
+  };
+}
+
+export function mapTourChangeRequestToAdminRow(request = {}) {
+  return {
+    id: request.id,
+    status: request.status || '',
+    createdAt: request.created_at || '',
+    reviewedAt: request.reviewed_at || '',
+    rejectionReason: request.rejection_reason || '',
+    requested: mapRequestedTourPayload(request.payload ?? {})
   };
 }
 
@@ -176,6 +338,10 @@ export function mapTourToAdminRow(tour = {}) {
   const transportLabels = normalizeList(tour.transport);
   const detailText = htmlToText(tour.content_html) || compactText(tour.description) || '상세 설명이 없습니다.';
   const priceLabel = formatPrice(tour.currency, tour.price_amount);
+  const pendingChangeRequest = (tour.tour_change_requests ?? [])
+    .filter((request) => request?.status === 'pending')
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .map(mapTourChangeRequestToAdminRow)[0] ?? null;
 
   return {
     id: tour.id,
@@ -204,7 +370,9 @@ export function mapTourToAdminRow(tour = {}) {
     maxPeopleLabel: formatPeople(tour.max_people),
     options: optionLabels.join(', '),
     optionLabels,
-    transportLabels
+    transportLabels,
+    reviewType: pendingChangeRequest ? 'edit' : 'new',
+    pendingChangeRequest
   };
 }
 
@@ -244,7 +412,7 @@ export function buildAdminMemberMessageRequest({ adminId, target = {}, title, bo
 
 export async function fetchAdminMembers(client) {
   const profiles = await client.request('profiles', {
-    query: '?select=id,email,display_name,role,is_guide,status,created_at'
+    query: '?select=id,email,display_name,avatar_path,role,is_guide,status,created_at,updated_at,metadata'
   });
   const guideProfiles = await client.request('guide_profiles', {
     query: '?select=*,tours(id)'
@@ -263,6 +431,54 @@ export async function fetchAdminMembers(client) {
     },
     integrityWarnings: buildMemberIntegrityWarnings({ profiles, guideProfiles, travelerCount })
   };
+}
+
+export async function fetchAdminMemberDetail(client, memberId) {
+  const encodedMemberId = encodeURIComponent(requireText(memberId, 'A member id is required.'));
+  const [profiles, accountSettings, guideProfiles, reservations, reviews, supportTickets, bookmarks, conversations] = await Promise.all([
+    client.request('profiles', {
+      query: `?select=id,email,display_name,avatar_path,role,is_guide,status,created_at,updated_at,metadata&id=eq.${encodedMemberId}`
+    }),
+    client.request('account_settings', {
+      query: `?select=*&profile_id=eq.${encodedMemberId}`
+    }),
+    client.request('guide_profiles', {
+      query: `?select=*,tours(id)&user_id=eq.${encodedMemberId}`
+    }),
+    client.request('reservations', {
+      query: `?select=id,reserved_date,people_count,amount,currency,status,created_at,updated_at,tours(title)&traveler_id=eq.${encodedMemberId}&order=reserved_date.desc`
+    }),
+    client.request('reviews', {
+      query: `?select=id,rating,content,status,created_at,updated_at,tours(title)&author_id=eq.${encodedMemberId}&order=created_at.desc`
+    }),
+    client.request('support_tickets', {
+      query: `?select=id,subject,status,created_at,updated_at&author_id=eq.${encodedMemberId}&order=created_at.desc`
+    }),
+    client.request('bookmarks', {
+      query: `?select=tour_id,created_at,tours(title)&profile_id=eq.${encodedMemberId}&order=created_at.desc`
+    }),
+    client.request('conversations', {
+      query: `?select=id,type,title,last_message,created_at,updated_at&or=(traveler_id.eq.${encodedMemberId},participant_id.eq.${encodedMemberId})&order=updated_at.desc`
+    })
+  ]);
+  const profile = profiles[0];
+  if (!profile) return null;
+  const guideProfile = guideProfiles[0] ?? null;
+  const settlements = guideProfile?.id
+    ? await client.request('settlements', {
+      query: `?select=id,amount,currency,cycle,status,created_at,updated_at&guide_id=eq.${encodeURIComponent(guideProfile.id)}&order=created_at.desc`
+    })
+    : [];
+  return mapProfileToAdminMember({
+    ...profile,
+    reservations,
+    reviews,
+    supportTickets,
+    bookmarks,
+    conversations,
+    accountSettings: accountSettings[0] ?? null,
+    guideProfile: guideProfile ? { ...guideProfile, settlements } : null
+  });
 }
 
 export async function findOrCreateAdminConversation(client, { adminId, memberId, title = '운영팀 메시지' }) {
@@ -310,7 +526,7 @@ export async function fetchAdminConversations(client) {
 
 export async function fetchAdminTours(client) {
   const tours = await client.request('tours', {
-    query: '?select=*,guide_profiles(display_name),tour_images(image_path,sort_order),reservations(id)&order=created_at.desc'
+    query: '?select=*,guide_profiles(display_name),tour_images(image_path,sort_order),reservations(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)&order=created_at.desc'
   });
   return tours.map(mapTourToAdminRow);
 }
@@ -331,6 +547,18 @@ export async function updateTourStatus(client, { tourId, status }) {
     body: { status: asAdminStatus(status) }
   });
   return updated[0] ?? null;
+}
+
+export async function reviewTourChangeRequest(client, { requestId, decision, reason = '' }) {
+  const updated = await client.request('rpc/review_tour_change_request', {
+    method: 'POST',
+    body: {
+      p_request_id: requireText(requestId, 'A tour change request id is required.'),
+      p_decision: requireText(decision, 'A review decision is required.'),
+      p_reason: reason || ''
+    }
+  });
+  return updated[0] ?? updated ?? null;
 }
 
 export async function fetchAdminReviews(client) {

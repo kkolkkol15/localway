@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Ban, Check, Eye, Pause, Play, Plus, Send, Trash2 } from 'lucide-react';
 import { DataTable } from '../components/DataTable.jsx';
 import { Modal } from '../components/Modal.jsx';
 import { useAdmin } from '../state/AdminContext.jsx';
+import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
 import {
   approveGuideApplication,
   createGuideVerificationSignedUrl,
   createSupabaseRestClient,
+  fetchAdminGuideApplicationDetail,
   fetchPendingGuideApplications,
   getSupabaseAdminConfig,
   rejectGuideApplication
@@ -18,6 +20,7 @@ import {
   createPlatformSetting,
   deleteNotice,
   fetchAdminConversations,
+  fetchAdminMemberDetail,
   fetchAdminMembers,
   fetchAdminReviews,
   fetchAdminTours,
@@ -25,6 +28,7 @@ import {
   fetchPlatformSettings,
   fetchSupportTickets,
   replyToSupportTicket,
+  reviewTourChangeRequest,
   sendAdminConversationMessage,
   sendAdminMemberMessage,
   updateReviewStatus,
@@ -33,8 +37,16 @@ import {
 
 const money = (value) => `${value.toLocaleString('ko-KR')}원`;
 const badgeClass = (value) => `badge ${['대기', '열림', '처리중', 'pending'].includes(value) ? 'warn' : ['벤', '거절', '삭제', 'rejected'].includes(value) ? 'danger' : 'ok'}`;
-const statusLabel = (value) => ({ pending: '대기', approved: '승인', rejected: '거절' })[value] ?? value;
+const statusLabel = (value) => ({ pending: '대기', approved: '승인', active: '활성', paused: '정지', rejected: '거절' })[value] ?? value;
 const fieldValue = (value) => Array.isArray(value) ? value.join(', ') : value || '-';
+const detailValue = (value) => {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
+  if (value && typeof value === 'object') return Object.keys(value).length ? JSON.stringify(value) : '-';
+  if (value === 0) return 0;
+  if (typeof value === 'boolean') return value ? '예' : '아니오';
+  return value || '-';
+};
+const formatDateTime = (value) => value ? new Date(value).toLocaleString('ko-KR') : '-';
 
 function StatusBadge({ value }) {
   return <span className={badgeClass(value)}>{statusLabel(value)}</span>;
@@ -140,10 +152,27 @@ export function GuideApproval() {
 }
 
 function GuideApplicationDetail({ application, client, state, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [detailError, setDetailError] = useState('');
   const [imageUrls, setImageUrls] = useState({ profile: '', idDocument: '', error: '' });
   const guideProfile = state.guideProfilesByUserId[application.user_id];
+  const currentGuide = detail?.currentGuide || (guideProfile ? {
+    name: guideProfile.display_name,
+    city: guideProfile.city,
+    nationality: guideProfile.nationality,
+    birthYear: guideProfile.birth_year,
+    gender: guideProfile.gender,
+    residenceYears: guideProfile.residence_years,
+    nativeLanguage: guideProfile.languages?.[0],
+    additionalLanguages: guideProfile.languages?.slice(1),
+    intro: guideProfile.intro,
+    profileImagePath: guideProfile.profile_image_path,
+    status: guideProfile.status,
+    updatedAt: guideProfile.updated_at,
+    metadata: guideProfile.metadata
+  } : null);
   const tourDrafts = guideProfile ? state.tourDraftsByGuideId[guideProfile.id] ?? [] : [];
-  const profileRows = [
+  const originalRows = [
     ['이름', application.real_name],
     ['국적', application.nationality],
     ['나이 대신 생년월일', application.birth_date],
@@ -154,6 +183,36 @@ function GuideApplicationDetail({ application, client, state, onClose }) {
     ['추가 언어', application.additional_languages],
     ['소개', application.intro]
   ];
+  const currentRows = currentGuide ? [
+    ['이름', currentGuide.name || detail?.profile?.name],
+    ['회원 이메일', detail?.profile?.email],
+    ['국적', currentGuide.nationality],
+    ['생년', currentGuide.birthYear],
+    ['성별', currentGuide.gender],
+    ['거주 도시', currentGuide.city],
+    ['거주 기간', `${currentGuide.residenceYears ?? 0}년`],
+    ['모국어', currentGuide.nativeLanguage],
+    ['추가 언어', currentGuide.additionalLanguages],
+    ['소개', currentGuide.intro],
+    ['프로필 이미지', currentGuide.profileImagePath],
+    ['최근 수정', formatDateTime(currentGuide.updatedAt)]
+  ] : [];
+
+  useEffect(() => {
+    let active = true;
+    setDetail(null);
+    setDetailError('');
+    fetchAdminGuideApplicationDetail(client, { applicationId: application.id, userId: application.user_id })
+      .then((nextDetail) => {
+        if (active) setDetail(nextDetail);
+      })
+      .catch((error) => {
+        if (active) setDetailError(error.message || '최신 가이드 상세를 불러오지 못했습니다.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [application.id, application.user_id, client]);
 
   useEffect(() => {
     let active = true;
@@ -183,7 +242,15 @@ function GuideApplicationDetail({ application, client, state, onClose }) {
             <VerificationImage title="신분증 이미지" src={imageUrls.idDocument} path={application.id_document_image_path} />
           </div>
           {imageUrls.error && <p className="form-error">{imageUrls.error}</p>}
-          <dl className="info-list">{profileRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{fieldValue(value)}</dd></div>)}</dl>
+          {detailError && <p className="form-error">{detailError}</p>}
+          {currentRows.length ? (
+            <>
+              <h3>현재 프로필</h3>
+              <dl className="info-list">{currentRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl>
+            </>
+          ) : <p className="empty-text">현재 가이드 프로필은 아직 없습니다.</p>}
+          <h3>신청서 원본</h3>
+          <dl className="info-list">{originalRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl>
         </section>
         <section className="panel flat-panel">
           <h3>Tour Drafts</h3>
@@ -201,6 +268,137 @@ function VerificationImage({ title, src, path }) {
       {src ? <img src={src} alt={title} /> : <div className="verification-image-empty">이미지를 불러오는 중입니다.</div>}
       <small>{path || '-'}</small>
     </figure>
+  );
+}
+
+function MemberDetailModal({ member, client, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState('');
+  const memberId = member.userId || member.id;
+  const display = detail || member;
+  const guideProfile = display.guideProfile || display.detail || null;
+  const accountSettings = display.accountSettings || null;
+  const activity = display.activity ?? {};
+  const reservations = activity.reservations ?? { total: display.bookings ?? 0, latest: null };
+  const reviews = activity.reviews ?? { total: 0, latest: null };
+  const supportTickets = activity.supportTickets ?? { total: 0, latest: null };
+  const bookmarks = activity.bookmarks ?? { total: 0, latest: null };
+  const conversations = activity.conversations ?? { total: 0, latest: null };
+  const rows = [
+    ['역할', display.role],
+    ['가이드 여부', display.isGuide ? '예' : '아니오'],
+    ['상태', display.status],
+    ['가입일', formatDateTime(display.joinedAt)],
+    ['최근 수정', formatDateTime(display.updatedAt)],
+    ['회원 ID', memberId]
+  ];
+  const settingRows = accountSettings ? [
+    ['언어', accountSettings.preferences?.language],
+    ['통화', accountSettings.preferences?.currency],
+    ['시간대', accountSettings.preferences?.timezone],
+    ['프로필 공개', accountSettings.privacy?.profileVisibility],
+    ['메시지 이메일', accountSettings.notifications?.messageEmail ? '켜짐' : '꺼짐'],
+    ['로그인 알림', accountSettings.security?.loginAlerts ? '켜짐' : '꺼짐']
+  ] : [];
+  const latestRows = [
+    ['최근 예약', reservations.latest ? `${reservations.latest.title} · ${reservations.latest.status || '-'} · ${reservations.latest.date || '-'}` : '없음'],
+    ['최근 후기', reviews.latest ? `${reviews.latest.title} · ${reviews.latest.rating ?? '-'}점 · ${reviews.latest.status || '-'}` : '없음'],
+    ['최근 문의', supportTickets.latest ? `${supportTickets.latest.subject} · ${supportTickets.latest.status || '-'}` : '없음'],
+    ['최근 대화', conversations.latest ? `${conversations.latest.title} · ${conversations.latest.lastMessage || '메시지 없음'}` : '없음']
+  ];
+  const guideRows = guideProfile ? [
+    ['가이드명', guideProfile.name],
+    ['도시', guideProfile.city],
+    ['국적', guideProfile.nationality],
+    ['생년', guideProfile.birthYear],
+    ['성별', guideProfile.gender],
+    ['거주 기간', `${guideProfile.residenceYears ?? 0}년`],
+    ['모국어', guideProfile.nativeLanguage],
+    ['추가 언어', guideProfile.additionalLanguages],
+    ['소개', guideProfile.intro],
+    ['프로필 이미지', guideProfile.profileImagePath],
+    ['등록 투어 수', guideProfile.tours],
+    ['활성 투어 수', guideProfile.activeTours],
+    ['정산 건수', guideProfile.settlements],
+    ['대기 정산', guideProfile.pendingSettlements],
+    ['최근 수정', formatDateTime(guideProfile.updatedAt)]
+  ] : [];
+  const metricCards = [
+    ['예약', reservations.total ?? display.bookings ?? 0, reservations.latest?.status || '전체 예약'],
+    ['후기', reviews.total ?? 0, reviews.latest ? `${reviews.latest.rating ?? '-'}점 최근 후기` : '작성 후기 없음'],
+    ['문의', supportTickets.total ?? 0, supportTickets.latest?.status || '문의 없음'],
+    ['북마크', bookmarks.total ?? 0, bookmarks.latest?.title || '저장한 투어 없음']
+  ];
+
+  useEffect(() => {
+    let active = true;
+    setDetail(null);
+    setError('');
+    fetchAdminMemberDetail(client, memberId)
+      .then((nextDetail) => {
+        if (active) setDetail(nextDetail);
+      })
+      .catch((fetchError) => {
+        if (active) setError(fetchError.message || '최신 회원 상세를 불러오지 못했습니다.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, memberId]);
+
+  return (
+    <Modal title="회원 상세" onClose={onClose} wide>
+      <div className="member-detail-shell">
+        <section className="member-detail-hero">
+          <div className="member-detail-avatar">
+            {display.avatar ? <img src={display.avatar} alt="" /> : <span>{String(display.name || display.email || 'M').slice(0, 1).toUpperCase()}</span>}
+          </div>
+          <div className="member-detail-heading">
+            <div className="member-detail-title-row">
+              <div>
+                <h3>{display.name || '회원'}</h3>
+                <p>{display.email || '-'}</p>
+              </div>
+              <StatusBadge value={display.status} />
+            </div>
+            <div className="member-detail-meta">
+              <span>{display.isGuide ? '가이드 회원' : '여행객 회원'}</span>
+              <span>{formatDateTime(display.joinedAt)} 가입</span>
+              <span>{formatDateTime(display.updatedAt)} 수정</span>
+            </div>
+          </div>
+        </section>
+        {error && <p className="form-error">{error}</p>}
+        {!detail && !error && <p className="empty-text">최신 정보를 불러오는 중입니다.</p>}
+        <section className="member-detail-metrics">
+          {metricCards.map(([label, value, caption]) => (
+            <article className="member-detail-metric" key={label}>
+              <span>{label}</span>
+              <strong>{Number(value ?? 0).toLocaleString('ko-KR')}</strong>
+              <small>{detailValue(caption)}</small>
+            </article>
+          ))}
+        </section>
+        <section className="member-detail-grid">
+          <article className="panel flat-panel">
+            <h3>계정 정보</h3>
+            <dl className="info-list">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl>
+          </article>
+          <article className="panel flat-panel">
+            <h3>활동 요약</h3>
+            <dl className="info-list">{latestRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl>
+          </article>
+          <article className="panel flat-panel">
+            <h3>계정 설정</h3>
+            {settingRows.length ? <dl className="info-list">{settingRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl> : <p className="empty-text">저장된 계정 설정이 없습니다.</p>}
+          </article>
+          <article className="panel flat-panel">
+            <h3>가이드 프로필</h3>
+            {guideRows.length ? <dl className="info-list">{guideRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{detailValue(value)}</dd></div>)}</dl> : <p className="empty-text">연결된 가이드 프로필이 없습니다.</p>}
+          </article>
+        </section>
+      </div>
+    </Modal>
   );
 }
 
@@ -262,7 +460,7 @@ export function MemberManagement() {
       {remoteMembers.integrityWarnings?.length ? <section className="panel notice-panel"><h2>회원 데이터 정합성 확인 필요</h2>{remoteMembers.integrityWarnings.map((warning) => <p key={warning}>{warning}</p>)}</section> : null}
       <div className="tabs"><button className={isTraveler ? 'active' : ''} onClick={() => setTab('travelers')}>여행객</button><button className={!isTraveler ? 'active' : ''} onClick={() => setTab('guides')}>가이드</button></div>
       <DataTable rows={rows} columns={columns} searchPlaceholder="회원 검색" />
-      {selected && <Modal title="회원 상세" onClose={() => setSelected(null)} wide><div className="stack"><h3>{selected.name}</h3><p>{selected.profile ?? selected.email}</p><p>{selected.settlement ?? `예약 이력: ${selected.history?.join(', ')}`}</p><p>후기: {selected.reviews?.join(', ') ?? '등록 투어 리스트와 정산 정보를 확인할 수 있습니다.'}</p></div></Modal>}
+      {selected && <MemberDetailModal member={selected} client={client} onClose={() => setSelected(null)} />}
       {action && <ReasonModal title="회원 상태 변경" label={action.type === 'SUSPEND_GUIDE' ? '정지 기간 또는 사유' : '사유'} onClose={() => setAction(null)} onSubmit={(reason) => dispatch({ type: action.type, payload: { id: action.row.id, reason, period: reason } })} />}
       {messageTarget && (
         <MessageModal
@@ -299,9 +497,14 @@ export function TourManagement() {
   const [city, setCity] = useState('전체');
   const [selected, setSelected] = useState(null);
   const [pause, setPause] = useState(null);
+  const [rejectingTour, setRejectingTour] = useState(null);
   const [remoteTours, setRemoteTours] = useState([]);
   const config = getSupabaseAdminConfig();
   const client = useMemo(() => createSupabaseRestClient({ ...config, accessToken: state.auth.accessToken }), [config.url, config.publishableKey, state.auth.accessToken]);
+  const refreshTours = async () => {
+    const items = await fetchAdminTours(client);
+    setRemoteTours(items);
+  };
   useEffect(() => {
     let active = true;
     fetchAdminTours(client)
@@ -327,15 +530,50 @@ export function TourManagement() {
     } catch {}
     dispatch({ type: 'RESUME_TOUR', payload: { id: tour.id } });
   };
+  const approveTour = async (tour) => {
+    try {
+      if (tour.pendingChangeRequest?.id) {
+        await reviewTourChangeRequest(client, { requestId: tour.pendingChangeRequest.id, decision: 'approved' });
+      } else {
+        await updateTourStatus(client, { tourId: tour.id, status: 'active' });
+      }
+      await refreshTours();
+    } catch {}
+    dispatch({ type: 'RESUME_TOUR', payload: { id: tour.id } });
+  };
+  const rejectTour = async (tour, reason) => {
+    try {
+      if (tour.pendingChangeRequest?.id) {
+        await reviewTourChangeRequest(client, { requestId: tour.pendingChangeRequest.id, decision: 'rejected', reason });
+      } else {
+        await updateTourStatus(client, { tourId: tour.id, status: 'rejected' });
+      }
+      await refreshTours();
+    } catch {}
+    setRejectingTour(null);
+  };
+  const renderTourActions = (row) => {
+    const isPending = row.status === 'pending';
+    return (
+      <div className="row-actions">
+        <ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>
+        {isPending && <ActionButton icon={Check} tone="primary" onClick={() => approveTour(row)}>승인</ActionButton>}
+        {isPending && <ActionButton icon={Ban} onClick={() => setRejectingTour(row)}>거절</ActionButton>}
+        {!isPending && ['활성', 'active'].includes(row.status) && <ActionButton icon={Pause} onClick={() => setPause(row)}>정지</ActionButton>}
+        {!isPending && ['일시정지', 'paused'].includes(row.status) && <ActionButton icon={Play} tone="primary" onClick={() => resumeTour(row)}>재개</ActionButton>}
+      </div>
+    );
+  };
   return (
     <>
-      <DataTable rows={rows} searchPlaceholder="투어, 도시, 가이드 검색" filters={<select value={city} onChange={(event) => setCity(event.target.value)}>{['전체', '서울', '부산', '제주', '문화', '미식', '자연', '활성', '일시정지'].map((item) => <option key={item}>{item}</option>)}</select>} columns={[
+      <DataTable rows={rows} searchPlaceholder="투어, 도시, 가이드 검색" filters={<select value={city} onChange={(event) => setCity(event.target.value)}>{['전체', '서울', '부산', '제주', '문화', '미식', '자연', 'active', 'pending', 'paused', 'rejected'].map((item) => <option key={item}>{item}</option>)}</select>} columns={[
         { key: 'thumbnail', label: '썸네일', render: (row) => <img className="thumb" src={row.thumbnail} alt="" /> }, { key: 'title', label: '제목', sortable: true }, { key: 'guide', label: '가이드', sortable: true }, { key: 'city', label: '도시', sortable: true },
         { key: 'createdAt', label: '등록일', sortable: true }, { key: 'bookings', label: '예약 건수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
-        { key: 'actions', label: '관리', render: (row) => <div className="row-actions"><ActionButton icon={Eye} onClick={() => setSelected(row)}>상세</ActionButton>{['활성', 'active'].includes(row.status) ? <ActionButton icon={Pause} onClick={() => setPause(row)}>정지</ActionButton> : <ActionButton icon={Play} tone="primary" onClick={() => resumeTour(row)}>재개</ActionButton>}</div> }
+        { key: 'actions', label: '관리', render: renderTourActions }
       ]} />
       {selected && <TourDetailModal tour={selected} onClose={() => setSelected(null)} />}
       {pause && <ReasonModal title="투어 일시 정지" onClose={() => setPause(null)} onSubmit={(reason) => pauseTour(pause, reason)} />}
+      {rejectingTour && <ReasonModal title="투어 거절" onClose={() => setRejectingTour(null)} onSubmit={(reason) => rejectTour(rejectingTour, reason)} />}
     </>
   );
 }
@@ -419,8 +657,51 @@ function TourDetailModal({ tour, onClose }) {
             <ChipList items={tour.transportLabels} emptyText="미입력" />
           </div>
         </section>
+        {tour.pendingChangeRequest && <TourChangeRequestPanel tour={tour} request={tour.pendingChangeRequest} />}
       </div>
     </Modal>
+  );
+}
+
+function TourChangeRequestPanel({ tour, request }) {
+  const rows = [
+    ['제목', tour.title, request.requested.title],
+    ['도시', tour.city, request.requested.city],
+    ['유형', tour.type, request.requested.type],
+    ['가격', tour.priceLabel, request.requested.priceLabel],
+    ['소요 시간', tour.durationLabel, request.requested.durationLabel],
+    ['최대 인원', tour.maxPeopleLabel, request.requested.maxPeopleLabel],
+    ['결제 방식', tour.paymentTypeLabel, request.requested.paymentTypeLabel]
+  ];
+  return (
+    <section className="tour-detail-panel tour-change-panel">
+      <div className="tour-change-heading">
+        <h4>수정 승인 요청</h4>
+        <span>{request.createdAt ? new Date(request.createdAt).toLocaleString('ko-KR') : '요청일 미입력'}</span>
+      </div>
+      <div className="tour-change-table">
+        <b>항목</b>
+        <b>현재 값</b>
+        <b>요청 값</b>
+        {rows.map(([label, current, requested]) => (
+          <Fragment key={label}>
+            <span>{label}</span>
+            <span>{current || '-'}</span>
+            <strong>{requested || '-'}</strong>
+          </Fragment>
+        ))}
+      </div>
+      <div className="tour-change-description">
+        <div>
+          <b>현재 설명</b>
+          <p>{tour.detailText || '-'}</p>
+        </div>
+        <div>
+          <b>요청 설명</b>
+          <p>{request.requested.detailText || '-'}</p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -610,6 +891,7 @@ function NoticeForm({ client, adminId, onCreated, onClose }) {
 
 export function GuideMessages() {
   const { state } = useAdmin();
+  const { markConversationRead, setActiveConversationId } = useMessageBadge();
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [body, setBody] = useState('');
@@ -632,6 +914,15 @@ export function GuideMessages() {
       active = false;
     };
   }, [client]);
+
+  useEffect(() => {
+    const conversationId = selected?.id || '';
+    setActiveConversationId(conversationId);
+    if (conversationId) {
+      markConversationRead(conversationId).catch(() => {});
+    }
+    return () => setActiveConversationId('');
+  }, [markConversationRead, selected?.id, setActiveConversationId]);
 
   const sendReply = async () => {
     const text = body.trim();

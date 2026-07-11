@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import {
   buildAccountSettingsRow,
   buildBookmarkRow,
+  buildGuideProfilePatch,
   buildConversationMessageRow,
+  buildMemberProfilePatch,
   buildSupportTicketRow,
   buildHomepageTourSections,
   fetchActiveTours,
   mapConversationRecord,
   mapTourRecord,
+  updateGuideProfile,
+  updateMemberProfile,
   upsertAccountSettings,
   toggleBookmark
 } from '../lib/customerApi.js';
@@ -146,6 +150,54 @@ test('buildAccountSettingsRow stores account preferences as json fields', () => 
   });
 });
 
+test('buildMemberProfilePatch maps editable member profile fields', () => {
+  assert.deepEqual(buildMemberProfilePatch({
+    email: 'mina@example.com',
+    displayName: 'Mina Kim',
+    avatarPath: 'avatars/mina.png'
+  }), {
+    email: 'mina@example.com',
+    display_name: 'Mina Kim',
+    avatar_path: 'avatars/mina.png'
+  });
+});
+
+test('buildGuideProfilePatch maps editable guide profile fields', () => {
+  assert.deepEqual(buildGuideProfilePatch({
+    nationality: '대한민국',
+    birthYear: '1990',
+    birthMonth: '07',
+    birthDay: '05',
+    city: 'Seoul',
+    years: '5',
+    gender: 'Female',
+    nativeLanguage: 'Korean',
+    additionalLanguages: ['English', 'Japanese'],
+    intro: 'Local markets',
+    profilePhotoName: 'profile.jpg',
+    languageLevels: { English: 'Fluent' }
+  }, {
+    displayName: 'Mina Kim',
+    profileImagePath: 'user-1/profile.jpg'
+  }), {
+    display_name: 'Mina Kim',
+    city: 'Seoul',
+    languages: ['Korean', 'English', 'Japanese'],
+    intro: 'Local markets',
+    profile_image_path: 'user-1/profile.jpg',
+    nationality: '대한민국',
+    gender: 'Female',
+    birth_year: 1990,
+    residence_years: 5,
+    metadata: {
+      birthMonth: '07',
+      birthDay: '05',
+      languageLevels: { English: 'Fluent' },
+      profilePhotoName: 'profile.jpg'
+    }
+  });
+});
+
 test('buildBookmarkRow maps a saved tour to the join table', () => {
   assert.deepEqual(buildBookmarkRow({ profileId: 'user-1', tourId: 'tour-1' }), {
     profile_id: 'user-1',
@@ -236,6 +288,96 @@ test('upsertAccountSettings writes one row per profile', async () => {
   assert.equal(result.profile_id, 'user-1');
   assert.equal(calls[0][0], 'account_settings');
   assert.deepEqual(calls[0][2], { onConflict: 'profile_id' });
+});
+
+test('updateMemberProfile patches the current profile row', async () => {
+  const calls = [];
+  const fakeClient = {
+    from: (table) => ({
+      update: (row) => {
+        calls.push(['update', table, row]);
+        return {
+          eq: (column, value) => {
+            calls.push(['eq', column, value]);
+            return { select: () => ({ single: async () => ({ data: { id: value, ...row }, error: null }) }) };
+          }
+        };
+      }
+    })
+  };
+
+  const result = await updateMemberProfile(fakeClient, {
+    profileId: 'user-1',
+    email: 'mina@example.com',
+    displayName: 'Mina Kim'
+  });
+
+  assert.equal(result.display_name, 'Mina Kim');
+  assert.deepEqual(calls, [
+    ['update', 'profiles', { email: 'mina@example.com', display_name: 'Mina Kim' }],
+    ['eq', 'id', 'user-1']
+  ]);
+});
+
+test('updateGuideProfile patches guide profile fields without a new photo upload', async () => {
+  const calls = [];
+  const fakeClient = {
+    storage: {
+      from: () => ({
+        upload: async () => {
+          throw new Error('upload should not be called');
+        }
+      })
+    },
+    from: (table) => ({
+      update: (row) => {
+        calls.push(['update', table, row]);
+        return {
+          eq: (column, value) => {
+            calls.push(['eq', column, value]);
+            return { select: () => ({ single: async () => ({ data: { id: value, ...row }, error: null }) }) };
+          }
+        };
+      }
+    })
+  };
+
+  const result = await updateGuideProfile(fakeClient, {
+    guideProfileId: 'guide-1',
+    userId: 'user-1',
+    displayName: 'Mina Kim',
+    payload: {
+      city: 'Seoul',
+      nativeLanguage: 'Korean',
+      additionalLanguages: ['English'],
+      intro: 'Markets',
+      years: '3',
+      birthYear: '1992'
+    },
+    currentProfile: { profilePhotoUrl: 'user-1/profile.jpg' }
+  });
+
+  assert.equal(result.city, 'Seoul');
+  assert.deepEqual(calls, [
+    ['update', 'guide_profiles', {
+      display_name: 'Mina Kim',
+      city: 'Seoul',
+      languages: ['Korean', 'English'],
+      intro: 'Markets',
+      profile_image_path: 'user-1/profile.jpg',
+      nationality: null,
+      gender: null,
+      birth_year: 1992,
+      residence_years: 3,
+      metadata: {
+        birthMonth: '',
+        birthDay: '',
+        languageLevels: {},
+        profilePhotoName: ''
+      }
+    }],
+    ['eq', 'id', 'guide-1']
+  ]);
 });
 
 test('toggleBookmark deletes existing saved tour or inserts a new one', async () => {

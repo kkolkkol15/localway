@@ -4,15 +4,16 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-r
 import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
 import { cities, faqs, languages, tourTypes, tours, transports } from '../data/mockData.js';
 import { useAppState } from '../state/AppContext.jsx';
+import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
 import { formatRoleLabel, isRegisteredGuideRole, selectors } from '../state/appStore.js';
 import { Modal, SkeletonGrid, TourCard } from '../components/UI.jsx';
 import { validateGuideProfilePhoto } from '../lib/guidePhoto.js';
 import { expandDateRange, getCalendarUnavailableSelection, saveGuideUnavailableDates } from '../lib/guideAvailability.js';
 import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js';
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
-import { publishGuideTour } from '../lib/guideTours.js';
+import { buildTourFormPayloadFromTour, fetchGuideTours, publishGuideTour, submitTourChangeRequest } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
-import { buildHomepageTourSections, createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, upsertAccountSettings } from '../lib/customerApi.js';
+import { buildHomepageTourSections, createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
 
@@ -417,16 +418,21 @@ export function LoginPage() {
     const confirmPassword = String(form.get('confirmPassword') || '');
     const firstName = String(form.get('firstName') || '');
     const lastName = String(form.get('lastName') || '');
+    const avatarFile = isSignup ? form.get('avatarFile') : null;
 
     try {
       if (isSignup && password !== confirmPassword) {
         throw new Error('Passwords do not match.');
       }
+      if (isSignup && avatarFile?.size) {
+        const avatarValidation = validateGuideProfilePhoto(avatarFile);
+        if (!avatarValidation.ok) throw new Error(avatarValidation.error);
+      }
 
       const displayName = isSignup ? buildSignupDisplayName(firstName, lastName) : '';
       const client = await createBrowserSupabaseClient();
       const result = isSignup
-        ? await signUpWithEmail(client, { email, password, displayName })
+        ? await signUpWithEmail(client, { email, password, displayName, avatarFile })
         : await signInWithEmail(client, { email, password });
 
       if (result.requiresEmailConfirmation) {
@@ -461,6 +467,7 @@ export function LoginPage() {
               <label className="auth-field font-bold">Last name<input className="h-12 rounded-card border px-4 font-semibold" name="lastName" placeholder="Kim" autoComplete="family-name" required /></label>
             </div>
           )}
+          {isSignup && <label className="auth-field font-bold">Profile photo<span className="mt-2 flex h-12 items-center rounded-card border px-4 text-sm font-semibold text-zinc-500"><input className="w-full text-sm" name="avatarFile" type="file" accept="image/*" /></span></label>}
           <label className="auth-field font-bold">Email<input className="h-12 rounded-card border px-4 font-semibold" name="email" type="email" placeholder="you@example.com" autoComplete="email" required /></label>
           <label className="auth-field font-bold">Password<input className="h-12 rounded-card border px-4 font-semibold" name="password" type="password" minLength={6} placeholder="6+ characters" autoComplete={isSignup ? 'new-password' : 'current-password'} required /></label>
           {isSignup && <label className="auth-field font-bold">Confirm password<input className="h-12 rounded-card border px-4 font-semibold" name="confirmPassword" type="password" minLength={6} placeholder="Repeat password" autoComplete="new-password" required /></label>}
@@ -569,7 +576,7 @@ function buildGuideApplicationPayload(formElement, { agreements, draftId } = {})
   };
 }
 
-function GuideFormFields({ draft }) {
+function GuideFormFields({ draft, includeIdDocument = true }) {
   const [nationality, setNationality] = useState(draft?.nationality ?? '');
   const [gender, setGender] = useState(draft?.gender ?? 'Female');
   const [nativeLanguage, setNativeLanguage] = useState(draft?.nativeLanguage ?? '');
@@ -590,8 +597,8 @@ function GuideFormFields({ draft }) {
 
   return (
     <section className="guide-card grid gap-6">
-      <DropArea label="Profile photo" name="profilePhoto" savedFileName={draft?.profilePhotoName} savedPhotoUrl={draft?.profilePhotoUrl} />
-      <DropArea label="ID document image" name="idDocumentImage" savedFileName={draft?.idDocumentImageName} savedHiddenName="savedIdDocumentImageName" />
+      <DropArea label="Profile photo" name="profilePhoto" savedFileName={draft?.profilePhotoName} savedPhotoUrl={draft?.profilePhotoUrl} required={!draft?.profilePhotoUrl} />
+      {includeIdDocument && <DropArea label="ID document image" name="idDocumentImage" savedFileName={draft?.idDocumentImageName} savedHiddenName="savedIdDocumentImageName" />}
 
       <SearchableInput
         label="Nationality"
@@ -726,7 +733,7 @@ function syncNativeLanguageTag(tags, previousNativeLanguage, nextNativeLanguage)
   ];
 }
 
-function DropArea({ label, name, savedFileName = '', savedPhotoUrl = '', savedHiddenName = 'savedProfilePhotoName' }) {
+function DropArea({ label, name, savedFileName = '', savedPhotoUrl = '', savedHiddenName = 'savedProfilePhotoName', required = true }) {
   const inputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(savedPhotoUrl);
@@ -796,7 +803,7 @@ function DropArea({ label, name, savedFileName = '', savedPhotoUrl = '', savedHi
           name={name}
           type="file"
           accept="image/*"
-          required={!photoUrl}
+          required={required && !photoUrl}
           onChange={(event) => selectFile(event.target.files?.[0])}
         />
         <input type="hidden" name={savedHiddenName} value={savedFileName} />
@@ -1074,6 +1081,15 @@ export function AccountSettingsPage() {
         const { error } = await client.auth.updateUser(authUpdates);
         if (error) throw error;
       }
+      if (getSupabaseConfig().isConfigured && state.auth.user?.id) {
+        const client = await createBrowserSupabaseClient();
+        await updateMemberProfile(client, {
+          profileId: state.auth.user.id,
+          email: email || state.auth.user.email,
+          displayName: name,
+          avatarPath: state.auth.user.avatar
+        });
+      }
       dispatch({
         type: 'UPDATE_USER_PROFILE',
         payload: {
@@ -1088,20 +1104,37 @@ export function AccountSettingsPage() {
       setProfileNotice(getAuthErrorMessage(error));
     }
   };
-  const saveGuideProfile = (event) => {
+  const saveGuideProfile = async (event) => {
     event.preventDefault();
     const { type: _draftType, ...payload } = buildGuideApplicationPayload(event.currentTarget);
-    dispatch({
-      type: 'UPDATE_GUIDE_PROFILE',
-      payload: {
-        ...payload,
-        id: state.guideProfile?.id,
-        profilePhotoUrl: payload.profilePhotoUrl || state.guideProfile?.profilePhotoUrl || state.auth.user.avatar,
-        profilePhotoName: payload.profilePhotoName || state.guideProfile?.profilePhotoName || ''
+    try {
+      let savedProfile = null;
+      if (getSupabaseConfig().isConfigured && state.guideProfile?.id && state.auth.user?.id) {
+        const client = await createBrowserSupabaseClient();
+        savedProfile = await updateGuideProfile(client, {
+          guideProfileId: state.guideProfile.id,
+          userId: state.auth.user.id,
+          displayName: state.auth.user.name || state.auth.user.email || 'Guide',
+          payload,
+          formElement: event.currentTarget,
+          currentProfile: state.guideProfile
+        });
       }
-    });
-    setProfileNotice('가이드 프로필이 저장됐습니다.');
-    openSettingsSection('guide-profile', false);
+      dispatch({
+        type: 'UPDATE_GUIDE_PROFILE',
+        payload: {
+          ...payload,
+          id: state.guideProfile?.id,
+          profilePhotoUrl: savedProfile?.profile_image_path || payload.profilePhotoUrl || state.guideProfile?.profilePhotoUrl || state.auth.user.avatar,
+          profilePhotoName: payload.profilePhotoName || state.guideProfile?.profilePhotoName || '',
+          status: savedProfile?.status || state.guideProfile?.status
+        }
+      });
+      setProfileNotice('가이드 프로필이 저장됐습니다.');
+      openSettingsSection('guide-profile', false);
+    } catch (error) {
+      setProfileNotice(getAuthErrorMessage(error));
+    }
   };
 
   return (
@@ -1192,7 +1225,7 @@ export function AccountSettingsPage() {
               <AccountSettingsReadOnly user={state.auth.user} guideProfile={state.guideProfile} mode="guide" />
             ) : (
               <form className="mt-5 grid gap-5" onSubmit={saveGuideProfile}>
-                <GuideFormFields draft={state.guideProfile} />
+                <GuideFormFields draft={state.guideProfile} includeIdDocument={false} />
                 <button className="settings-save-button">Save guide profile</button>
               </form>
             ))}
@@ -1744,7 +1777,7 @@ export function GuideModePage() {
 }
 
 const guideModeActionMeta = {
-  'my-tours': { Icon: Package, value: '0', href: null },
+  'my-tours': { Icon: Package, value: '0', href: '/mypage/guide-mode/tours' },
   'create-tour': { Icon: Upload, value: '+', href: '/mypage/guide-mode/new' },
   'saved-drafts': { Icon: List, valueKey: 'savedDrafts', href: null },
   calendar: { Icon: CalendarDays, valueKey: 'unavailableDates', href: null },
@@ -1837,16 +1870,105 @@ function GuideDraftsPanel({ drafts }) {
   );
 }
 
+function guideTourStatusLabel(status) {
+  return ({
+    draft: 'Draft',
+    pending: 'Admin review',
+    active: 'Active',
+    paused: 'Paused',
+    rejected: 'Rejected'
+  })[status] ?? status ?? '-';
+}
+
+function formatGuideTourPrice(tour = {}) {
+  const amount = Number(tour.price_amount ?? 0).toLocaleString('en-US');
+  return `${tour.currency || 'USD'} ${amount}`;
+}
+
+export function GuideMyToursPage() {
+  const { state } = useAppState();
+  const [guideTours, setGuideTours] = useState([]);
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    async function loadTours() {
+      if (!state.guideProfile?.id) return;
+      try {
+        if (getSupabaseConfig().isConfigured) {
+          const client = await createBrowserSupabaseClient();
+          const rows = await fetchGuideTours(client, { guideProfileId: state.guideProfile.id });
+          if (active) setGuideTours(rows);
+        } else if (active) {
+          setNotice('Supabase is not configured. Published guide tours will appear here after database connection.');
+        }
+      } catch (error) {
+        if (active) setNotice(getAuthErrorMessage(error));
+      }
+    }
+    loadTours();
+    return () => {
+      active = false;
+    };
+  }, [state.guideProfile?.id]);
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="guide-mode-header">
+        <div>
+          <h1 className="text-3xl font-black">My Tours</h1>
+          <p className="text-sm font-semibold text-zinc-500">Manage submitted tours and request edits for admin review.</p>
+        </div>
+        <div className="guide-mode-header-actions">
+          <Link className="guide-mode-secondary-action" to="/mypage/guide-mode">Back</Link>
+          <Link className="guide-mode-primary-action" to="/mypage/guide-mode/new">New Tour</Link>
+        </div>
+      </div>
+      {notice && <p className="tour-draft-notice mt-4">{notice}</p>}
+      <section className="guide-tour-list">
+        {guideTours.length ? guideTours.map((tour) => {
+          const pendingRequest = (tour.tour_change_requests ?? []).find((request) => request.status === 'pending');
+          return (
+            <article className="guide-tour-card" key={tour.id}>
+              <div>
+                <span className={`guide-tour-status ${tour.status || 'draft'}`}>{guideTourStatusLabel(tour.status)}</span>
+                <h2>{tour.title || 'Untitled tour'}</h2>
+                <p>{tour.city || '-'} · {tour.type || '-'} · {formatGuideTourPrice(tour)}</p>
+                <small>{pendingRequest ? 'Edit request is waiting for admin review.' : `Updated ${tour.updated_at ? new Date(tour.updated_at).toLocaleString() : '-'}`}</small>
+              </div>
+              <div className="guide-tour-card-actions">
+                <span>{tour.reservations?.length ?? 0} bookings</span>
+                <Link to={`/mypage/guide-mode/tours/${encodeURIComponent(tour.id)}/edit`}>Edit</Link>
+              </div>
+            </article>
+          );
+        }) : (
+          <div className="guide-tour-empty">
+            <Package size={28} />
+            <b>No tours submitted yet</b>
+            <p>Create a new tour and it will appear here after submission.</p>
+            <Link to="/mypage/guide-mode/new">Create New Tour</Link>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 export function TourCreatePage() {
   const { state, dispatch } = useAppState();
   const [searchParams] = useSearchParams();
+  const { tourId } = useParams();
   const draftIdFromUrl = searchParams.get('draftId');
   const draft = draftIdFromUrl ? selectors.guideTourDraft(state, draftIdFromUrl) : null;
+  const isEditMode = Boolean(tourId);
+  const [editPayload, setEditPayload] = useState(null);
+  const formSource = editPayload ?? draft ?? null;
   const [draftId] = useState(() => draft?.id ?? `tour-draft-${Date.now()}`);
-  const [agree, setAgree] = useState(draft?.agreements ?? [false, false, false]);
-  const [pricingMode, setPricingMode] = useState(draft?.paymentType ?? 'pay_as_you_go');
-  const [hourlyPrice, setHourlyPrice] = useState(draft?.hourlyPrice ? clampHourlyPrice(draft.hourlyPrice) : hourlyPriceRange.defaultValue);
-  const [editorHtml, setEditorHtml] = useState(draft?.contentHtml ?? '');
+  const [agree, setAgree] = useState(formSource?.agreements ?? [false, false, false]);
+  const [pricingMode, setPricingMode] = useState(formSource?.paymentType ?? 'pay_as_you_go');
+  const [hourlyPrice, setHourlyPrice] = useState(formSource?.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
+  const [editorHtml, setEditorHtml] = useState(formSource?.contentHtml ?? '');
   const [draftNotice, setDraftNotice] = useState('');
   const [draftBusy, setDraftBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -1854,6 +1976,35 @@ export function TourCreatePage() {
   const activePricing = getPricingMode(pricingMode);
   const guideInfoDetails = buildGuideInfoDetails(state.guideProfile);
   const updateHourlyPrice = (value) => setHourlyPrice(clampHourlyPrice(value));
+
+  useEffect(() => {
+    let active = true;
+    async function loadEditableTour() {
+      if (!isEditMode || !state.guideProfile?.id) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const rows = await fetchGuideTours(client, { guideProfileId: state.guideProfile.id });
+        const tour = rows.find((item) => item.id === tourId);
+        if (active && tour) setEditPayload(buildTourFormPayloadFromTour(tour));
+        if (active && !tour) setDraftNotice('Tour not found.');
+      } catch (error) {
+        if (active) setDraftNotice(getAuthErrorMessage(error));
+      }
+    }
+    loadEditableTour();
+    return () => {
+      active = false;
+    };
+  }, [isEditMode, state.guideProfile?.id, tourId]);
+
+  useEffect(() => {
+    if (!formSource) return;
+    setAgree(formSource.agreements ?? [true, true, true]);
+    setPricingMode(formSource.paymentType ?? 'pay_as_you_go');
+    setHourlyPrice(formSource.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
+    setEditorHtml(formSource.contentHtml ?? '');
+  }, [formSource?.id]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     const payload = buildTourDraftPayload(event.currentTarget, { agreements: agree, contentHtml: editorHtml, draftId });
@@ -1862,16 +2013,21 @@ export function TourCreatePage() {
     try {
       if (getSupabaseConfig().isConfigured) {
         const client = await createBrowserSupabaseClient();
-        await publishGuideTour(client, {
-          payload,
-          guideProfileId: state.guideProfile?.id,
-          fallbackCity: state.guideProfile?.city
-        });
-        setDraftNotice('Tour submitted for review.');
+        if (isEditMode) {
+          await submitTourChangeRequest(client, { tourId, payload });
+          setDraftNotice('Edit request submitted. This tour is now paused until admin review.');
+        } else {
+          await publishGuideTour(client, {
+            payload,
+            guideProfileId: state.guideProfile?.id,
+            fallbackCity: state.guideProfile?.city
+          });
+          setDraftNotice('Tour submitted for review.');
+        }
       } else {
-        setDraftNotice('Tour published locally.');
+        setDraftNotice(isEditMode ? 'Edit request saved locally.' : 'Tour published locally.');
       }
-      dispatch({ type: 'PUBLISH_TOUR', payload });
+      if (!isEditMode) dispatch({ type: 'PUBLISH_TOUR', payload });
     } catch (error) {
       setDraftNotice(getAuthErrorMessage(error));
     } finally {
@@ -1907,13 +2063,13 @@ export function TourCreatePage() {
     <main className="tour-create-shell">
       <div className="tour-create-heading">
         <div>
-          <span>Create Tour</span>
-          <h1>New guide product</h1>
+          <span>{isEditMode ? 'Edit Tour' : 'Create Tour'}</span>
+          <h1>{isEditMode ? 'Request product changes' : 'New guide product'}</h1>
         </div>
-        <Link className="tour-create-back" to="/mypage/guide-mode">Back to guide mode</Link>
+        <Link className="tour-create-back" to={isEditMode ? '/mypage/guide-mode/tours' : '/mypage/guide-mode'}>{isEditMode ? 'Back to my tours' : 'Back to guide mode'}</Link>
       </div>
 
-      <form className="tour-create-form" onSubmit={handleSubmit}>
+      <form className="tour-create-form" onSubmit={handleSubmit} key={formSource?.id ?? draftId}>
         <section className="tour-guide-strip">
           <ProfileAvatar src={guideAvatar} className="h-14 w-14 text-primary" />
           <div className="tour-guide-info-body">
@@ -1942,12 +2098,12 @@ export function TourCreatePage() {
             <h2>Product basics</h2>
           </div>
           <div className="tour-basic-grid">
-            <label className="tour-field">Title<input name="title" placeholder="Evening market walk in Seoul" defaultValue={draft?.title ?? ''} required /></label>
-            <label className="tour-field">Tour type<select name="type" defaultValue={draft?.typeValue ?? tourTypes[0]}>{tourTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-            <label className="tour-field">City<input name="city" placeholder="Seoul" defaultValue={draft?.city ?? state.guideProfile?.city ?? ''} required /></label>
-            <label className="tour-field">Duration minutes<input name="durationMinutes" type="number" min="30" step="15" defaultValue={draft?.durationMinutes ?? 60} required /></label>
-            <label className="tour-field">Max people<input name="maxPeople" type="number" min="1" step="1" defaultValue={draft?.maxPeople ?? 1} required /></label>
-            <label className="tour-field wide">Short description<textarea name="description" placeholder="Describe what travelers will experience." defaultValue={draft?.description ?? ''} required /></label>
+            <label className="tour-field">Title<input name="title" placeholder="Evening market walk in Seoul" defaultValue={formSource?.title ?? ''} required /></label>
+            <label className="tour-field">Tour type<select name="type" defaultValue={formSource?.typeValue ?? tourTypes[0]}>{tourTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+            <label className="tour-field">City<input name="city" placeholder="Seoul" defaultValue={formSource?.city ?? state.guideProfile?.city ?? ''} required /></label>
+            <label className="tour-field">Duration minutes<input name="durationMinutes" type="number" min="30" step="15" defaultValue={formSource?.durationMinutes ?? 60} required /></label>
+            <label className="tour-field">Max people<input name="maxPeople" type="number" min="1" step="1" defaultValue={formSource?.maxPeople ?? 1} required /></label>
+            <label className="tour-field wide">Short description<textarea name="description" placeholder="Describe what travelers will experience." defaultValue={formSource?.description ?? ''} required /></label>
           </div>
         </section>
 
@@ -1990,13 +2146,13 @@ export function TourCreatePage() {
                 </div>
                 <div className="price-side-stack">
                   <label className="tour-field compact">Hourly price<input name="hourlyPrice" type="number" min={hourlyPriceRange.min} max={hourlyPriceRange.max} step="1" value={hourlyPrice} onChange={(event) => updateHourlyPrice(event.target.value)} required /></label>
-                  <label className="tour-field compact">Currency<select name="currency" defaultValue={draft?.currency ?? 'USD'}>{majorCurrencyOptions.map((currency) => <option value={currency.code} key={currency.code}>{currency.label}</option>)}</select></label>
+                  <label className="tour-field compact">Currency<select name="currency" defaultValue={formSource?.currency ?? 'USD'}>{majorCurrencyOptions.map((currency) => <option value={currency.code} key={currency.code}>{currency.label}</option>)}</select></label>
                 </div>
               </div>
             ) : (
               <div className="price-package-grid">
-                <label className="tour-field">{activePricing.priceLabel}<input name={activePricing.fieldName} type="number" min="0" step="1" placeholder="0" defaultValue={draft?.packagePrice ?? ''} required /></label>
-                <label className="tour-field">Currency<select name="currency" defaultValue={draft?.currency ?? 'USD'}>{majorCurrencyOptions.map((currency) => <option value={currency.code} key={currency.code}>{currency.label}</option>)}</select></label>
+                <label className="tour-field">{activePricing.priceLabel}<input name={activePricing.fieldName} type="number" min="0" step="1" placeholder="0" defaultValue={formSource?.packagePrice ?? ''} required /></label>
+                <label className="tour-field">Currency<select name="currency" defaultValue={formSource?.currency ?? 'USD'}>{majorCurrencyOptions.map((currency) => <option value={currency.code} key={currency.code}>{currency.label}</option>)}</select></label>
               </div>
             )}
           </div>
@@ -2010,12 +2166,12 @@ export function TourCreatePage() {
           <div className="tour-option-grid">
             {tourOptionGroups.map((option) => (
               <div className="tour-option-row" key={option.id}>
-                <input id={`tour-option-${option.id}`} name={`option_${option.id}`} type="checkbox" value="yes" defaultChecked={draft?.[`option_${option.id}`] === 'yes'} />
+                <input id={`tour-option-${option.id}`} name={`option_${option.id}`} type="checkbox" value="yes" defaultChecked={formSource?.[`option_${option.id}`] === 'yes'} />
                 <div className="tour-option-copy">
                   <b>{option.label}</b>
                   <small>{option.description}</small>
                 </div>
-                {option.allowsPrice && <input className="tour-option-price" name={`option_${option.id}_price`} type="number" min="0" step="1" placeholder="Optional price" defaultValue={draft?.[`option_${option.id}_price`] ?? ''} aria-label={`${option.label} optional price`} />}
+                {option.allowsPrice && <input className="tour-option-price" name={`option_${option.id}_price`} type="number" min="0" step="1" placeholder="Optional price" defaultValue={formSource?.[`option_${option.id}_price`] ?? ''} aria-label={`${option.label} optional price`} />}
               </div>
             ))}
           </div>
@@ -2082,8 +2238,8 @@ export function TourCreatePage() {
         <input type="hidden" name="draftId" value={draftId} />
         <div className="tour-create-actions">
           {draftNotice && <p className="tour-draft-notice">{draftNotice}</p>}
-          <button type="button" className="tour-secondary-action" onClick={(event) => saveTourDraft(event.currentTarget.form)} disabled={draftBusy}>{draftBusy ? 'Saving...' : 'Save draft'}</button>
-          <button className="tour-primary-action" disabled={!agree.every(Boolean) || publishBusy}>{publishBusy ? 'Publishing...' : 'Publish'}</button>
+          {!isEditMode && <button type="button" className="tour-secondary-action" onClick={(event) => saveTourDraft(event.currentTarget.form)} disabled={draftBusy}>{draftBusy ? 'Saving...' : 'Save draft'}</button>}
+          <button className="tour-primary-action" disabled={!agree.every(Boolean) || publishBusy}>{publishBusy ? 'Submitting...' : isEditMode ? 'Submit for review' : 'Publish'}</button>
         </div>
       </form>
     </main>
@@ -2145,6 +2301,7 @@ export function BookmarksPage() {
 
 export function MessagesPage() {
   const { state, dispatch } = useAppState();
+  const { markConversationRead, setActiveConversationId } = useMessageBadge();
   const [activeCategory, setActiveCategory] = useState('all');
   const [remoteConversations, setRemoteConversations] = useState([]);
   const allConversations = useMemo(
@@ -2186,6 +2343,15 @@ export function MessagesPage() {
       active = false;
     };
   }, [state.auth.user?.id]);
+
+  useEffect(() => {
+    const conversationId = selected?.id || '';
+    setActiveConversationId(conversationId);
+    if (conversationId && !conversationId.startsWith('mock-')) {
+      markConversationRead(conversationId).catch(() => {});
+    }
+    return () => setActiveConversationId('');
+  }, [markConversationRead, selected?.id, setActiveConversationId]);
 
   const sendMessage = async () => {
     if (!text.trim() || !selected) return;

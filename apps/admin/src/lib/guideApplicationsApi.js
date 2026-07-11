@@ -215,6 +215,43 @@ export function normalizePendingGuideData({ applications = [], guideProfiles = [
   };
 }
 
+export function buildGuideApplicationDetail(application = {}, profile = null, guideProfile = null) {
+  const [nativeLanguage = '', ...additionalLanguages] = guideProfile?.languages ?? [];
+  const currentGuide = guideProfile ? {
+    id: guideProfile.id,
+    userId: guideProfile.user_id,
+    name: guideProfile.display_name || profile?.display_name || application.real_name || 'Guide',
+    city: guideProfile.city || '',
+    nationality: guideProfile.nationality || '',
+    birthYear: guideProfile.birth_year || '',
+    gender: guideProfile.gender || '',
+    residenceYears: guideProfile.residence_years ?? 0,
+    nativeLanguage,
+    additionalLanguages,
+    intro: guideProfile.intro || '',
+    profileImagePath: guideProfile.profile_image_path || '',
+    status: guideProfile.status || '',
+    updatedAt: guideProfile.updated_at || '',
+    metadata: guideProfile.metadata ?? {}
+  } : null;
+
+  return {
+    application,
+    profile: profile ? {
+      id: profile.id,
+      name: profile.display_name || profile.email || application.real_name || 'Member',
+      email: profile.email || '',
+      avatar: profile.avatar_path || '',
+      role: profile.role || '',
+      isGuide: Boolean(profile.is_guide),
+      status: profile.status || '',
+      updatedAt: profile.updated_at || '',
+      metadata: profile.metadata ?? {}
+    } : null,
+    currentGuide
+  };
+}
+
 export async function fetchPendingGuideApplications(client = createSupabaseRestClient()) {
   if (!client.isConfigured) {
     return normalizePendingGuideData({});
@@ -235,6 +272,27 @@ export async function fetchPendingGuideApplications(client = createSupabaseRestC
     : [];
 
   return normalizePendingGuideData({ applications, guideProfiles, tourDrafts });
+}
+
+export async function fetchAdminGuideApplicationDetail(client, { applicationId, userId }) {
+  const applicationFilters = [];
+  if (applicationId) applicationFilters.push(`id=eq.${encodeURIComponent(applicationId)}`);
+  if (userId) applicationFilters.push(`user_id=eq.${encodeURIComponent(userId)}`);
+  const applications = await client.request('guide_applications', {
+    query: `?select=*&${applicationFilters.join('&')}&limit=1`
+  });
+  const application = applications[0];
+  if (!application) return null;
+  const encodedUserId = encodeURIComponent(application.user_id);
+  const [profiles, guideProfiles] = await Promise.all([
+    client.request('profiles', {
+      query: `?select=id,email,display_name,avatar_path,role,is_guide,status,updated_at,metadata&id=eq.${encodedUserId}`
+    }),
+    client.request('guide_profiles', {
+      query: `?select=*&user_id=eq.${encodedUserId}&limit=1`
+    })
+  ]);
+  return buildGuideApplicationDetail(application, profiles[0] ?? null, guideProfiles[0] ?? null);
 }
 
 export async function approveGuideApplication(client, application, reviewerId) {

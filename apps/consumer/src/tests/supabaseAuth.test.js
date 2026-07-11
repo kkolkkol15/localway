@@ -8,6 +8,7 @@ import {
   getSupabaseConfig,
   mapAuthUser,
   mapGuideProfile,
+  resolveAvatarUrl,
   signInWithEmail,
   signUpWithEmail
 } from '../lib/supabaseAuth.js';
@@ -59,12 +60,52 @@ test('mapGuideProfile keeps the approved guide profile id for tour publishing', 
     id: 'guide-profile-1',
     userId: 'user-1',
     city: 'Seoul',
+    nationality: '',
+    gender: '',
+    birthYear: '',
+    birthMonth: '',
+    birthDay: '',
+    years: 0,
     nativeLanguage: 'Korean',
     additionalLanguages: ['English'],
+    languageLevels: {},
     intro: 'Intro',
     profilePhotoUrl: 'profile.jpg',
+    profilePhotoName: '',
     status: 'active'
   });
+});
+
+test('resolveAvatarUrl keeps already-renderable avatar values', () => {
+  const client = {
+    storage: {
+      from: () => {
+        throw new Error('storage should not be used for renderable values');
+      }
+    }
+  };
+
+  assert.equal(resolveAvatarUrl(client, 'https://cdn.example.com/avatar.jpg'), 'https://cdn.example.com/avatar.jpg');
+  assert.equal(resolveAvatarUrl(client, 'data:image/png;base64,abc'), 'data:image/png;base64,abc');
+  assert.equal(resolveAvatarUrl(client, 'blob:http://local/avatar'), 'blob:http://local/avatar');
+  assert.equal(resolveAvatarUrl(client, ''), '');
+});
+
+test('resolveAvatarUrl converts avatar storage paths to public URLs', () => {
+  const calls = [];
+  const client = {
+    storage: {
+      from: (bucket) => ({
+        getPublicUrl: (path) => {
+          calls.push([bucket, path]);
+          return { data: { publicUrl: `https://assets.example.com/${bucket}/${path}` } };
+        }
+      })
+    }
+  };
+
+  assert.equal(resolveAvatarUrl(client, 'user-1/avatar.png'), 'https://assets.example.com/avatars/user-1/avatar.png');
+  assert.deepEqual(calls, [['avatars', 'user-1/avatar.png']]);
 });
 
 test('signInWithEmail returns active guide profile for approved guides', async () => {
@@ -224,6 +265,52 @@ test('signUpWithEmail creates auth user and traveler profile', async () => {
   }]);
 });
 
+test('signUpWithEmail uploads signup avatar and stores avatar path on profile', async () => {
+  const calls = [];
+  const avatarFile = { name: 'profile photo.png', size: 1024, type: 'image/png' };
+  const fakeClient = {
+    auth: {
+      signUp: async (payload) => {
+        calls.push(['signUp', payload]);
+        return { data: { session: { access_token: 'token' }, user: { id: 'user-1', email: payload.email, user_metadata: payload.options.data } }, error: null };
+      }
+    },
+    storage: {
+      from: (bucket) => ({
+        upload: async (path, file, options) => {
+          calls.push(['upload', bucket, path, file, options]);
+          return { error: null };
+        },
+        getPublicUrl: (path) => ({
+          data: { publicUrl: `https://assets.example.com/${bucket}/${path}` }
+        })
+      })
+    },
+    from: (table) => ({
+      insert: async (payload) => {
+        calls.push(['insert', table, payload]);
+        return { error: null };
+      }
+    })
+  };
+
+  const result = await signUpWithEmail(fakeClient, {
+    email: 'mina@example.com',
+    password: 'secret123',
+    displayName: 'Mina',
+    avatarFile
+  });
+
+  const uploadCall = calls.find(([type]) => type === 'upload');
+  const insertCall = calls.find(([type]) => type === 'insert');
+  assert.equal(uploadCall[1], 'avatars');
+  assert.match(uploadCall[2], /^user-1\/avatar-\d+-profile-photo\.png$/);
+  assert.equal(uploadCall[3], avatarFile);
+  assert.deepEqual(uploadCall[4], { upsert: true });
+  assert.equal(insertCall[2].avatar_path, uploadCall[2]);
+  assert.equal(result.user.avatar, `https://assets.example.com/avatars/${uploadCall[2]}`);
+});
+
 test('signUpWithEmail reports email confirmation when signup returns no session', async () => {
   const calls = [];
   const fakeClient = {
@@ -252,6 +339,42 @@ test('signUpWithEmail reports email confirmation when signup returns no session'
   assert.equal(calls.length, 1);
 });
 
+test('signUpWithEmail does not upload avatar when signup needs email confirmation', async () => {
+  const calls = [];
+  const fakeClient = {
+    auth: {
+      signUp: async (payload) => {
+        calls.push(['signUp', payload]);
+        return { data: { session: null, user: { id: 'user-1', email: payload.email, user_metadata: payload.options.data } }, error: null };
+      }
+    },
+    storage: {
+      from: () => ({
+        upload: async () => {
+          calls.push(['upload']);
+          return { error: null };
+        }
+      })
+    },
+    from: (table) => ({
+      insert: async (payload) => {
+        calls.push(['insert', table, payload]);
+        return { error: null };
+      }
+    })
+  };
+
+  const result = await signUpWithEmail(fakeClient, {
+    email: 'mina@example.com',
+    password: 'secret123',
+    displayName: 'Mina',
+    avatarFile: { name: 'avatar.png', size: 1, type: 'image/png' }
+  });
+
+  assert.equal(result.requiresEmailConfirmation, true);
+  assert.deepEqual(calls.map(([type]) => type), ['signUp']);
+});
+
 test('signInWithEmail returns mapped profile after password login', async () => {
   const fakeClient = {
     auth: {
@@ -264,12 +387,19 @@ test('signInWithEmail returns mapped profile after password login', async () => 
       select: () => ({
         eq: () => ({
           maybeSingle: async () => ({
-            data: { display_name: 'Mina', avatar_path: '', role: 'traveler', is_guide: false },
+            data: { display_name: 'Mina', avatar_path: 'user-1/avatar.png', role: 'traveler', is_guide: false },
             error: null
           })
         })
       })
-    })
+    }),
+    storage: {
+      from: (bucket) => ({
+        getPublicUrl: (path) => ({
+          data: { publicUrl: `https://assets.example.com/${bucket}/${path}` }
+        })
+      })
+    }
   };
 
   const result = await signInWithEmail(fakeClient, {
@@ -281,7 +411,7 @@ test('signInWithEmail returns mapped profile after password login', async () => 
     id: 'user-1',
     email: 'mina@example.com',
     name: 'Mina',
-    avatar: '',
+    avatar: 'https://assets.example.com/avatars/user-1/avatar.png',
     role: 'traveler',
     isGuide: false
   });

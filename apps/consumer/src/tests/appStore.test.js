@@ -214,6 +214,24 @@ test('tour draft stores the latest saved tour form and can be selected again', (
   assert.equal(selectors.guideTourDraft(state, 'tour-draft-1').currency, 'KRW');
 });
 
+test('publishing a tour removes the matching saved draft by payload id', () => {
+  let state = createInitialState();
+  state = {
+    ...state,
+    drafts: [
+      { id: 'tour-draft-1', type: 'tour-draft', title: 'Market walk' },
+      { id: 'other-draft', type: 'tour-draft', title: 'Other' }
+    ]
+  };
+
+  state = appReducer(state, {
+    type: 'PUBLISH_TOUR',
+    payload: { id: 'tour-draft-1', title: 'Market walk' }
+  });
+
+  assert.deepEqual(state.drafts.map((draft) => draft.id), ['other-draft']);
+});
+
 test('guide profile update stores guide fields and syncs avatar', () => {
   let state = createInitialState();
   state = appReducer(state, signedInAction);

@@ -4,7 +4,9 @@ import {
   MessageSquareText, PackageSearch, Settings, ShieldCheck, Star, Users
 } from 'lucide-react';
 import { useAdmin } from './state/AdminContext.jsx';
+import { MessageBadgeProvider, useMessageBadge } from './state/MessageBadgeContext.jsx';
 import { getSupabaseAdminConfig, signInAdminWithPassword } from './lib/guideApplicationsApi.js';
+import { formatUnreadBadge } from './lib/messageBadge.js';
 import { Toast } from './components/Toast.jsx';
 import {
   DashboardHome, GuideApproval, MemberManagement, TourManagement, BookingPayments,
@@ -70,6 +72,24 @@ function Protected({ children }) {
   return children;
 }
 
+function AdminTopActions({ adminName, dispatch, navigate }) {
+  const { unreadCount } = useMessageBadge();
+  const messageBadge = formatUnreadBadge(unreadCount);
+  return (
+    <div className="top-actions">
+      <button className="icon-button badge-anchor" type="button" aria-label="메시지" onClick={() => navigate('/admin/messages')}>
+        <MessageSquareText size={20} />
+        {messageBadge && <span className="message-unread-badge">{messageBadge}</span>}
+      </button>
+      <button className="icon-button" type="button" aria-label="알림"><Bell size={20} /></button>
+      <span>{adminName}</span>
+      <button className="ghost-button" type="button" onClick={() => dispatch({ type: 'LOGOUT' })}>
+        <LogOut size={17} /> 로그아웃
+      </button>
+    </div>
+  );
+}
+
 function AdminLayout() {
   const { state, dispatch } = useAdmin();
   const location = useLocation();
@@ -78,7 +98,8 @@ function AdminLayout() {
   const current = menus.find((item) => item.path === location.pathname) ?? menus[0];
 
   return (
-    <div className="admin-shell">
+    <MessageBadgeProvider>
+      <div className="admin-shell">
       <aside className="sidebar">
         <div className="brand">Local Way</div>
         <nav>
@@ -99,13 +120,7 @@ function AdminLayout() {
             <p className="eyebrow">관리자 콘솔</p>
             <h1>{current.label}</h1>
           </div>
-          <div className="top-actions">
-            <button className="icon-button" type="button" aria-label="알림"><Bell size={20} /></button>
-            <span>{state.auth.admin?.name}</span>
-            <button className="ghost-button" type="button" onClick={() => dispatch({ type: 'LOGOUT' })}>
-              <LogOut size={17} /> 로그아웃
-            </button>
-          </div>
+          <AdminTopActions adminName={state.auth.admin?.name} dispatch={dispatch} navigate={navigate} />
         </header>
         <main className="content">
           <Routes>
@@ -130,8 +145,9 @@ function AdminLayout() {
         })}
         <button type="button" onClick={() => navigate('/admin/settings')}><Menu size={19} /><span>더보기</span></button>
       </nav>
-      <Toast />
-    </div>
+        <Toast />
+      </div>
+    </MessageBadgeProvider>
   );
 }
 

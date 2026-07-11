@@ -10,11 +10,14 @@ import {
   buildMemberIntegrityWarnings,
   buildMemberMessagePayload,
   fetchAdminConversations,
+  fetchAdminMemberDetail,
   fetchAdminMembers,
   findOrCreateAdminConversation,
   mapProfileToAdminMember,
   mapConversationToAdminThread,
   mapTourToAdminRow,
+  mapTourChangeRequestToAdminRow,
+  reviewTourChangeRequest,
   sendAdminMemberMessage,
   updateTourStatus
 } from '../lib/adminDataApi.js';
@@ -350,6 +353,117 @@ test('mapProfileToAdminMember preserves member id for direct messages', () => {
   }).id, 'member-1');
 });
 
+test('mapProfileToAdminMember keeps expanded member and guide detail fields', () => {
+  const mapped = mapProfileToAdminMember({
+    id: 'member-1',
+    display_name: 'Mina',
+    email: 'mina@example.com',
+    avatar_path: 'avatar.png',
+    role: 'guide',
+    is_guide: true,
+    updated_at: '2026-07-10T00:00:00Z',
+    metadata: { phone: '010' },
+    accountSettings: { preferences: { language: 'ko' } },
+    reservations: [{ id: 'reservation-1', reserved_date: '2026-07-12', status: 'confirmed', amount: 60000, currency: 'KRW', tours: { title: 'Market tour' } }],
+    reviews: [{ id: 'review-1', rating: 5, content: 'Great', created_at: '2026-07-11T00:00:00Z', tours: { title: 'Market tour' } }],
+    supportTickets: [{ id: 'ticket-1', subject: 'Help', status: 'open', created_at: '2026-07-10T00:00:00Z' }],
+    bookmarks: [{ tour_id: 'tour-1', created_at: '2026-07-09T00:00:00Z', tours: { title: 'Saved tour' } }],
+    conversations: [{ id: 'conversation-1', title: '운영팀', last_message: '확인해주세요.', updated_at: '2026-07-08T00:00:00Z' }],
+    guideProfile: {
+      id: 'guide-1',
+      user_id: 'member-1',
+      display_name: 'Guide Mina',
+      city: 'Seoul',
+      languages: ['Korean', 'English'],
+      nationality: '대한민국',
+      birth_year: 1990,
+      residence_years: 5,
+      intro: 'Markets',
+      profile_image_path: 'profile.jpg',
+      tours: [{ id: 'tour-1', status: 'active' }],
+      settlements: [{ id: 'settlement-1', amount: 30000, currency: 'KRW', status: 'pending' }]
+    }
+  });
+
+  assert.equal(mapped.avatar, 'avatar.png');
+  assert.equal(mapped.updatedAt, '2026-07-10T00:00:00Z');
+  assert.deepEqual(mapped.metadata, { phone: '010' });
+  assert.equal(mapped.accountSettings.preferences.language, 'ko');
+  assert.equal(mapped.activity.reservations.total, 1);
+  assert.equal(mapped.activity.reviews.total, 1);
+  assert.equal(mapped.activity.supportTickets.total, 1);
+  assert.equal(mapped.activity.bookmarks.total, 1);
+  assert.equal(mapped.activity.conversations.total, 1);
+  assert.equal(mapped.activity.reservations.latest.title, 'Market tour');
+  assert.equal(mapped.activity.supportTickets.latest.subject, 'Help');
+  assert.equal(mapped.guideProfile.nativeLanguage, 'Korean');
+  assert.deepEqual(mapped.guideProfile.additionalLanguages, ['English']);
+  assert.equal(mapped.guideProfile.tours, 1);
+  assert.equal(mapped.guideProfile.settlements, 1);
+});
+
+test('fetchAdminMemberDetail loads latest profile settings and guide profile', async () => {
+  const calls = [];
+  const client = {
+    request: async (table, options) => {
+      calls.push([table, options.query]);
+      if (table === 'profiles') return [{
+        id: 'member-1',
+        display_name: 'Mina',
+        email: 'mina@example.com',
+        role: 'guide',
+        is_guide: true,
+        status: 'active',
+        reservations: [{ id: 'reservation-1' }]
+      }];
+      if (table === 'account_settings') return [{ profile_id: 'member-1', preferences: { language: 'ko' } }];
+      if (table === 'guide_profiles') return [{
+        id: 'guide-1',
+        user_id: 'member-1',
+        display_name: 'Guide Mina',
+        city: 'Seoul',
+        languages: ['Korean'],
+        tours: [{ id: 'tour-1', status: 'active' }]
+      }];
+      if (table === 'reservations') return [{ id: 'reservation-1', traveler_id: 'member-1', reserved_date: '2026-07-12', status: 'confirmed', tours: { title: 'Market tour' } }];
+      if (table === 'reviews') return [{ id: 'review-1', author_id: 'member-1', rating: 5, content: 'Great', tours: { title: 'Market tour' } }];
+      if (table === 'support_tickets') return [{ id: 'ticket-1', author_id: 'member-1', subject: 'Help', status: 'open' }];
+      if (table === 'bookmarks') return [{ profile_id: 'member-1', tour_id: 'tour-1', tours: { title: 'Saved tour' } }];
+      if (table === 'conversations') return [{ id: 'conversation-1', participant_id: 'member-1', title: '운영팀', last_message: '확인해주세요.' }];
+      if (table === 'settlements') return [{ id: 'settlement-1', guide_id: 'guide-1', amount: 30000, currency: 'KRW', status: 'pending' }];
+      return [];
+    }
+  };
+
+  const detail = await fetchAdminMemberDetail(client, 'member-1');
+
+  assert.equal(detail.name, 'Mina');
+  assert.equal(detail.bookings, 1);
+  assert.equal(detail.accountSettings.preferences.language, 'ko');
+  assert.equal(detail.activity.reservations.latest.title, 'Market tour');
+  assert.equal(detail.activity.reviews.total, 1);
+  assert.equal(detail.activity.supportTickets.total, 1);
+  assert.equal(detail.activity.bookmarks.total, 1);
+  assert.equal(detail.activity.conversations.total, 1);
+  assert.equal(detail.guideProfile.name, 'Guide Mina');
+  assert.equal(detail.guideProfile.settlements, 1);
+  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'account_settings', 'guide_profiles', 'reservations', 'reviews', 'support_tickets', 'bookmarks', 'conversations', 'settlements']);
+});
+
+test('mapProfileToAdminMember supplies stable empty activity fallbacks', () => {
+  const mapped = mapProfileToAdminMember({
+    id: 'member-1',
+    email: 'member@example.com'
+  });
+
+  assert.equal(mapped.activity.reservations.total, 0);
+  assert.equal(mapped.activity.reviews.total, 0);
+  assert.equal(mapped.activity.supportTickets.total, 0);
+  assert.equal(mapped.activity.bookmarks.total, 0);
+  assert.equal(mapped.activity.conversations.total, 0);
+  assert.equal(mapped.activity.reservations.latest, null);
+});
+
 test('buildAdminMemberMessageRequest uses guide user id and preserves admin sender', () => {
   assert.deepEqual(buildAdminMemberMessageRequest({
     adminId: 'admin-7',
@@ -476,6 +590,89 @@ test('mapTourToAdminRow supplies readable fallbacks for sparse tour detail data'
   assert.deepEqual(row.optionLabels, []);
   assert.deepEqual(row.transportLabels, []);
   assert.equal(row.hasImage, false);
+});
+
+test('mapTourToAdminRow exposes pending change request details for admin review', () => {
+  const row = mapTourToAdminRow({
+    id: 'tour-1',
+    title: 'Original title',
+    city: 'Seoul',
+    type: 'Food',
+    status: 'pending',
+    guide_profiles: { display_name: 'Guide Mina' },
+    tour_change_requests: [{
+      id: 'request-1',
+      status: 'pending',
+      created_at: '2026-07-10T09:00:00Z',
+      payload: {
+        title: 'Updated title',
+        city: 'Busan',
+        type: 'Nature',
+        description: 'Updated description',
+        price_amount: 70000,
+        currency: 'KRW',
+        payment_type: 'package',
+        duration_minutes: 120,
+        max_people: 5,
+        options: { pickup: true }
+      }
+    }]
+  });
+
+  assert.equal(row.reviewType, 'edit');
+  assert.equal(row.pendingChangeRequest.id, 'request-1');
+  assert.equal(row.pendingChangeRequest.requested.title, 'Updated title');
+  assert.equal(row.pendingChangeRequest.requested.priceLabel, 'KRW 70,000');
+});
+
+test('mapTourChangeRequestToAdminRow normalizes requested tour payload values', () => {
+  const row = mapTourChangeRequestToAdminRow({
+    id: 'request-2',
+    status: 'pending',
+    payload: {
+      title: 'Updated title',
+      city: 'Busan',
+      type: 'Nature',
+      description: 'Updated description',
+      price_amount: 70000,
+      currency: 'KRW',
+      payment_type: 'package',
+      duration_minutes: 120,
+      max_people: 5,
+      options: { pickup: true }
+    }
+  });
+
+  assert.equal(row.id, 'request-2');
+  assert.equal(row.requested.title, 'Updated title');
+  assert.equal(row.requested.durationLabel, '2시간');
+  assert.deepEqual(row.requested.optionLabels, ['pickup']);
+});
+
+test('reviewTourChangeRequest calls the admin review RPC', async () => {
+  const calls = [];
+  const client = {
+    request: async (path, options) => {
+      calls.push([path, options]);
+      return [{ id: 'request-1', status: 'approved' }];
+    }
+  };
+
+  const result = await reviewTourChangeRequest(client, {
+    requestId: 'request-1',
+    decision: 'approved',
+    reason: ''
+  });
+
+  assert.deepEqual(result, { id: 'request-1', status: 'approved' });
+  assert.deepEqual(calls[0], ['rpc/review_tour_change_request', {
+    method: 'POST',
+    body: {
+      p_request_id: 'request-1',
+      p_decision: 'approved',
+      p_reason: ''
+    }
+  }]);
 });
 
 test('updateTourStatus patches an existing tour status', async () => {

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createSupabaseRestClient,
+  buildGuideApplicationDetail,
+  fetchAdminGuideApplicationDetail,
   getReadableSupabaseAuthError,
   getSupabaseAdminConfig,
   normalizePendingGuideData,
@@ -65,6 +67,61 @@ test('normalizes guide application related records across statuses', () => {
   ]);
   assert.equal(normalized.guideProfilesByUserId['10000000-0000-4000-8000-000000000001'].id, '20000000-0000-4000-8000-000000000001');
   assert.equal(normalized.tourDraftsByGuideId['20000000-0000-4000-8000-000000000001'][0].title, 'Draft');
+});
+
+test('buildGuideApplicationDetail separates original application and current profile values', () => {
+  const detail = buildGuideApplicationDetail(
+    {
+      id: 'application-1',
+      real_name: 'Original Name',
+      city: 'Busan',
+      native_language: 'Korean',
+      additional_languages: ['English']
+    },
+    {
+      id: 'user-1',
+      email: 'guide@example.com',
+      display_name: 'Member Name',
+      is_guide: true
+    },
+    {
+      id: 'guide-1',
+      user_id: 'user-1',
+      display_name: 'Updated Guide',
+      city: 'Seoul',
+      languages: ['Japanese', 'English'],
+      nationality: '대한민국',
+      birth_year: 1990,
+      residence_years: 8,
+      intro: 'Updated intro',
+      profile_image_path: 'updated.jpg'
+    }
+  );
+
+  assert.equal(detail.application.real_name, 'Original Name');
+  assert.equal(detail.profile.email, 'guide@example.com');
+  assert.equal(detail.currentGuide.name, 'Updated Guide');
+  assert.equal(detail.currentGuide.city, 'Seoul');
+  assert.equal(detail.currentGuide.nativeLanguage, 'Japanese');
+  assert.deepEqual(detail.currentGuide.additionalLanguages, ['English']);
+});
+
+test('fetchAdminGuideApplicationDetail loads the latest member and guide profile rows', async () => {
+  const calls = [];
+  const client = {
+    request: async (table, options) => {
+      calls.push([table, options.query]);
+      if (table === 'guide_applications') return [{ id: 'application-1', user_id: 'user-1', real_name: 'Original Name' }];
+      if (table === 'profiles') return [{ id: 'user-1', email: 'guide@example.com', display_name: 'Member Name' }];
+      if (table === 'guide_profiles') return [{ id: 'guide-1', user_id: 'user-1', display_name: 'Updated Guide', languages: ['Korean'] }];
+      return [];
+    }
+  };
+
+  const detail = await fetchAdminGuideApplicationDetail(client, { applicationId: 'application-1', userId: 'user-1' });
+
+  assert.equal(detail.currentGuide.name, 'Updated Guide');
+  assert.deepEqual(calls.map(([table]) => table), ['guide_applications', 'profiles', 'guide_profiles']);
 });
 
 test('Supabase REST client does not call fetch when backend is not configured', async () => {
