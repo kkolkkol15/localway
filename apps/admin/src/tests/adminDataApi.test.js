@@ -303,6 +303,7 @@ test('fetchAdminMembers loads profiles and guide profiles together', async () =>
         { id: 'admin-1', display_name: 'Admin', email: 'admin@example.com', role: 'admin', status: 'active' }
       ];
       if (table === 'guide_profiles') return [{ id: 'guide-1', user_id: 'user-1', display_name: 'Guide', city: 'Seoul', status: 'active' }];
+      if (table === 'tours') return [{ id: 'tour-1', guide_id: 'guide-1', status: 'active' }];
       return [];
     },
     count: async (table, options) => {
@@ -318,9 +319,36 @@ test('fetchAdminMembers loads profiles and guide profiles together', async () =>
   assert.equal(result.travelers[0].name, 'Mina');
   assert.deepEqual(result.travelers.map((row) => row.name), ['Mina', 'Legacy']);
   assert.equal(result.guides[0].city, 'Seoul');
+  assert.equal(result.guides[0].tours, 1);
   assert.deepEqual(result.stats, { travelers: 12, guides: 4 });
-  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'guide_profiles', 'count:profiles', 'count:guide_profiles']);
-  assert.deepEqual(calls.slice(2), [['count:profiles', '?role=neq.admin'], ['count:guide_profiles', '?status=eq.active']]);
+  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'guide_profiles', 'tours', 'count:profiles', 'count:guide_profiles']);
+  assert.deepEqual(calls.slice(3), [['count:profiles', '?role=neq.admin'], ['count:guide_profiles', '?status=eq.active']]);
+});
+
+test('fetchAdminMembers falls back when optional member queries are unavailable', async () => {
+  const calls = [];
+  const client = {
+    request: async (table, options) => {
+      calls.push([table, options.query]);
+      if (table === 'profiles' && options.query.includes('metadata')) {
+        throw new Error('column profiles.metadata does not exist');
+      }
+      if (table === 'profiles') return [
+        { id: 'user-1', display_name: 'Mina', email: 'm@example.com', role: 'traveler', is_guide: false, status: 'active' }
+      ];
+      throw new Error(`${table} unavailable`);
+    },
+    count: async () => {
+      throw new Error('count unavailable');
+    }
+  };
+
+  const result = await fetchAdminMembers(client);
+
+  assert.equal(result.travelers.length, 1);
+  assert.equal(result.guides.length, 0);
+  assert.deepEqual(result.stats, { travelers: 1, guides: 0 });
+  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'profiles', 'guide_profiles', 'tours']);
 });
 
 test('buildMemberIntegrityWarnings reports broken guide membership invariants', () => {
@@ -422,9 +450,9 @@ test('fetchAdminMemberDetail loads latest profile settings and guide profile', a
         user_id: 'member-1',
         display_name: 'Guide Mina',
         city: 'Seoul',
-        languages: ['Korean'],
-        tours: [{ id: 'tour-1', status: 'active' }]
+        languages: ['Korean']
       }];
+      if (table === 'tours') return [{ id: 'tour-1', guide_id: 'guide-1', status: 'active' }];
       if (table === 'reservations') return [{ id: 'reservation-1', traveler_id: 'member-1', reserved_date: '2026-07-12', status: 'confirmed', tours: { title: 'Market tour' } }];
       if (table === 'reviews') return [{ id: 'review-1', author_id: 'member-1', rating: 5, content: 'Great', tours: { title: 'Market tour' } }];
       if (table === 'support_tickets') return [{ id: 'ticket-1', author_id: 'member-1', subject: 'Help', status: 'open' }];
@@ -446,8 +474,9 @@ test('fetchAdminMemberDetail loads latest profile settings and guide profile', a
   assert.equal(detail.activity.bookmarks.total, 1);
   assert.equal(detail.activity.conversations.total, 1);
   assert.equal(detail.guideProfile.name, 'Guide Mina');
+  assert.equal(detail.guideProfile.tours, 1);
   assert.equal(detail.guideProfile.settlements, 1);
-  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'account_settings', 'guide_profiles', 'reservations', 'reviews', 'support_tickets', 'bookmarks', 'conversations', 'settlements']);
+  assert.deepEqual(calls.map(([table]) => table), ['profiles', 'account_settings', 'guide_profiles', 'reservations', 'reviews', 'support_tickets', 'bookmarks', 'conversations', 'tours', 'settlements']);
 });
 
 test('mapProfileToAdminMember supplies stable empty activity fallbacks', () => {

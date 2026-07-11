@@ -410,24 +410,45 @@ export function buildAdminMemberMessageRequest({ adminId, target = {}, title, bo
   };
 }
 
+const adminProfileColumns = 'id,email,display_name,avatar_path,role,is_guide,status,created_at,updated_at';
+
+async function requestAdminProfiles(client, filters = '') {
+  try {
+    return await client.request('profiles', {
+      query: `?select=${adminProfileColumns},metadata${filters}`
+    });
+  } catch {
+    return client.request('profiles', {
+      query: `?select=${adminProfileColumns}${filters}`
+    });
+  }
+}
+
 export async function fetchAdminMembers(client) {
-  const profiles = await client.request('profiles', {
-    query: '?select=id,email,display_name,avatar_path,role,is_guide,status,created_at,updated_at,metadata'
-  });
-  const guideProfiles = await client.request('guide_profiles', {
-    query: '?select=*,tours(id)'
-  });
-  const [travelerCount, guideCount] = await Promise.all([
-    client.count('profiles', { query: '?role=neq.admin' }),
-    client.count('guide_profiles', { query: '?status=eq.active' })
+  const profiles = await requestAdminProfiles(client);
+  const fallbackTravelerCount = profiles.filter((profile) => profile.role !== 'admin').length;
+  const [rawGuideProfiles, guideTours, travelerCount, guideCount] = await Promise.all([
+    client.request('guide_profiles', {
+      query: '?select=*'
+    }).catch(() => []),
+    client.request('tours', {
+      query: '?select=id,guide_id,status'
+    }).catch(() => []),
+    client.count('profiles', { query: '?role=neq.admin' }).catch(() => fallbackTravelerCount),
+    client.count('guide_profiles', { query: '?status=eq.active' }).catch(() => null)
   ]);
+  const guideProfiles = rawGuideProfiles.map((profile) => ({
+    ...profile,
+    tours: guideTours.filter((tour) => tour.guide_id === profile.id)
+  }));
+  const fallbackGuideCount = guideProfiles.filter((profile) => profile.status === 'active').length;
 
   return {
     travelers: profiles.filter((profile) => profile.role !== 'admin').map(mapProfileToAdminMember),
     guides: guideProfiles.map(mapGuideProfileToAdminGuide),
     stats: {
       travelers: travelerCount,
-      guides: guideCount
+      guides: guideCount ?? fallbackGuideCount
     },
     integrityWarnings: buildMemberIntegrityWarnings({ profiles, guideProfiles, travelerCount })
   };
@@ -436,39 +457,42 @@ export async function fetchAdminMembers(client) {
 export async function fetchAdminMemberDetail(client, memberId) {
   const encodedMemberId = encodeURIComponent(requireText(memberId, 'A member id is required.'));
   const [profiles, accountSettings, guideProfiles, reservations, reviews, supportTickets, bookmarks, conversations] = await Promise.all([
-    client.request('profiles', {
-      query: `?select=id,email,display_name,avatar_path,role,is_guide,status,created_at,updated_at,metadata&id=eq.${encodedMemberId}`
-    }),
+    requestAdminProfiles(client, `&id=eq.${encodedMemberId}`),
     client.request('account_settings', {
       query: `?select=*&profile_id=eq.${encodedMemberId}`
-    }),
+    }).catch(() => []),
     client.request('guide_profiles', {
-      query: `?select=*,tours(id)&user_id=eq.${encodedMemberId}`
-    }),
+      query: `?select=*&user_id=eq.${encodedMemberId}`
+    }).catch(() => []),
     client.request('reservations', {
       query: `?select=id,reserved_date,people_count,amount,currency,status,created_at,updated_at,tours(title)&traveler_id=eq.${encodedMemberId}&order=reserved_date.desc`
-    }),
+    }).catch(() => []),
     client.request('reviews', {
       query: `?select=id,rating,content,status,created_at,updated_at,tours(title)&author_id=eq.${encodedMemberId}&order=created_at.desc`
-    }),
+    }).catch(() => []),
     client.request('support_tickets', {
       query: `?select=id,subject,status,created_at,updated_at&author_id=eq.${encodedMemberId}&order=created_at.desc`
-    }),
+    }).catch(() => []),
     client.request('bookmarks', {
       query: `?select=tour_id,created_at,tours(title)&profile_id=eq.${encodedMemberId}&order=created_at.desc`
-    }),
+    }).catch(() => []),
     client.request('conversations', {
       query: `?select=id,type,title,last_message,created_at,updated_at&or=(traveler_id.eq.${encodedMemberId},participant_id.eq.${encodedMemberId})&order=updated_at.desc`
-    })
+    }).catch(() => [])
   ]);
   const profile = profiles[0];
   if (!profile) return null;
   const guideProfile = guideProfiles[0] ?? null;
-  const settlements = guideProfile?.id
-    ? await client.request('settlements', {
-      query: `?select=id,amount,currency,cycle,status,created_at,updated_at&guide_id=eq.${encodeURIComponent(guideProfile.id)}&order=created_at.desc`
-    })
-    : [];
+  const [guideTours, settlements] = guideProfile?.id
+    ? await Promise.all([
+      client.request('tours', {
+        query: `?select=id,status&guide_id=eq.${encodeURIComponent(guideProfile.id)}`
+      }).catch(() => []),
+      client.request('settlements', {
+        query: `?select=id,amount,currency,cycle,status,created_at,updated_at&guide_id=eq.${encodeURIComponent(guideProfile.id)}&order=created_at.desc`
+      }).catch(() => [])
+    ])
+    : [[], []];
   return mapProfileToAdminMember({
     ...profile,
     reservations,
@@ -477,7 +501,7 @@ export async function fetchAdminMemberDetail(client, memberId) {
     bookmarks,
     conversations,
     accountSettings: accountSettings[0] ?? null,
-    guideProfile: guideProfile ? { ...guideProfile, settlements } : null
+    guideProfile: guideProfile ? { ...guideProfile, tours: guideTours, settlements } : null
   });
 }
 
