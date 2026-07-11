@@ -680,7 +680,7 @@ test('updateGuideProfile patches guide profile fields without a new photo upload
       years: '3',
       birthYear: '1992'
     },
-    currentProfile: { profilePhotoUrl: 'user-1/profile.jpg' }
+    currentProfile: { profilePhotoUrl: 'avatars/user-1/profile.jpg' }
   });
 
   assert.equal(result.city, 'Seoul');
@@ -690,7 +690,7 @@ test('updateGuideProfile patches guide profile fields without a new photo upload
       city: 'Seoul',
       languages: ['Korean', 'English'],
       intro: 'Markets',
-      profile_image_path: 'user-1/profile.jpg',
+      profile_image_path: 'avatars/user-1/profile.jpg',
       nationality: null,
       gender: null,
       birth_year: 1992,
@@ -704,6 +704,49 @@ test('updateGuideProfile patches guide profile fields without a new photo upload
     }],
     ['eq', 'id', 'guide-1']
   ]);
+});
+
+test('updateGuideProfile uploads new public guide photos to avatars bucket', async () => {
+  const calls = [];
+  const photoFile = { name: 'guide profile.png', size: 1000, type: 'image/png' };
+  const fakeClient = {
+    storage: {
+      from: (bucket) => ({
+        upload: async (path, file, options) => {
+          calls.push(['upload', bucket, path, file, options]);
+          return { error: null };
+        }
+      })
+    },
+    from: (table) => ({
+      update: (row) => {
+        calls.push(['update', table, row]);
+        return {
+          eq: (column, value) => {
+            calls.push(['eq', column, value]);
+            return { select: () => ({ single: async () => ({ data: { id: value, ...row }, error: null }) }) };
+          }
+        };
+      }
+    })
+  };
+
+  const result = await updateGuideProfile(fakeClient, {
+    guideProfileId: 'guide-1',
+    userId: 'user-1',
+    displayName: 'Mina Kim',
+    payload: { city: 'Seoul', nativeLanguage: 'Korean', intro: 'Markets' },
+    profilePhotoFile: photoFile,
+    currentProfile: { profilePhotoUrl: 'guide-verification/user-1/private-profile.png' }
+  });
+
+  const uploadCall = calls.find(([type]) => type === 'upload');
+  const updateCall = calls.find(([type]) => type === 'update');
+  assert.equal(uploadCall[1], 'avatars');
+  assert.match(uploadCall[2], /^user-1\/guide-avatar-\d+-guide-profile\.png$/);
+  assert.equal(uploadCall[3], photoFile);
+  assert.match(updateCall[2].profile_image_path, /^avatars\/user-1\/guide-avatar-\d+-guide-profile\.png$/);
+  assert.equal(result.profile_image_path, updateCall[2].profile_image_path);
 });
 
 test('toggleBookmark deletes existing saved tour or inserts a new one', async () => {

@@ -2840,6 +2840,329 @@
     content: attr(data-placeholder);
   }
 
+  .rich-editor {
+    overflow: hidden;
+    border: 1px solid rgb(228 228 231);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 18px 48px rgb(24 24 27 / 0.06);
+  }
+
+  .rich-editor-toolbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    border-bottom: 1px solid rgb(244 244 245);
+    background: #fffaf7;
+    padding: 10px;
+  }
+
+  .rich-editor-toolbar button {
+    display: inline-flex;
+    min-height: 38px;
+    min-width: 38px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: #52525b;
+    transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .rich-editor-toolbar button:hover,
+  .rich-editor-toolbar button.active {
+    background: #fff1e8;
+    color: #f05a28;
+    box-shadow: inset 0 0 0 1px rgb(240 90 40 / 0.22);
+  }
+
+  .rich-editor-toolbar button.wide {
+    width: auto;
+    padding: 0 14px;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .rich-editor-menu {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .rich-editor-popover,
+  .rich-editor-emoji-grid {
+    position: absolute;
+    left: 0;
+    top: 44px;
+    z-index: 5;
+    display: grid;
+    min-width: 132px;
+    gap: 4px;
+    border: 1px solid rgb(228 228 231);
+    border-radius: 8px;
+    background: white;
+    padding: 8px;
+    box-shadow: 0 16px 36px rgb(24 24 27 / 0.14);
+  }
+
+  .rich-editor-popover button {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .rich-editor-emoji-grid {
+    grid-template-columns: repeat(4, 36px);
+  }
+
+  .rich-editor-body,
+  .rich-editor-preview {
+    display: grid;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .rich-editor-dropzone {
+    display: flex;
+    min-height: 96px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1.5px dashed rgb(251 146 60);
+    border-radius: 8px;
+    background: #fff7ed;
+    color: #c2410c;
+    font-size: 13px;
+    font-weight: 900;
+    transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+  }
+
+  .rich-editor-dropzone:hover,
+  .rich-editor-dropzone.busy {
+    border-color: #f05a28;
+    background: #fff1e8;
+    transform: translateY(-1px);
+  }
+
+  .rich-editor-blocks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+
+  .rich-editor-block {
+    position: relative;
+    border: 1px solid rgb(244 244 245);
+    border-radius: 8px;
+    background: white;
+    padding: 12px;
+    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+
+  .rich-editor-block:not(.media) {
+    grid-column: 1 / -1;
+  }
+
+  .rich-editor-block.active {
+    border-color: rgb(251 146 60);
+    box-shadow: 0 10px 28px rgb(240 90 40 / 0.08);
+  }
+
+  .rich-editor-block.media {
+    cursor: grab;
+    padding: 8px;
+  }
+
+  .rich-editor-block.media:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 34px rgb(24 24 27 / 0.10);
+  }
+
+  .rich-editor-block textarea {
+    min-height: 104px;
+    width: 100%;
+    resize: vertical;
+    border: 0;
+    padding: 0;
+    color: #18181b;
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.65;
+    outline: none;
+  }
+
+  .rich-editor-block textarea.heading {
+    min-height: 48px;
+    font-size: 24px;
+    font-weight: 950;
+    line-height: 1.25;
+  }
+
+  .rich-editor-media {
+    display: block;
+    max-height: 420px;
+    width: 100%;
+    border-radius: 8px;
+    background: #f4f4f5;
+    object-fit: cover;
+  }
+
+  .rich-editor-delete {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    display: inline-flex;
+    height: 34px;
+    width: 34px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgb(24 24 27 / 0.72);
+    color: white;
+    opacity: 0;
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  .rich-editor-block:hover .rich-editor-delete,
+  .rich-editor-block.active .rich-editor-delete {
+    opacity: 1;
+  }
+
+  .rich-editor-delete:hover {
+    transform: scale(1.04);
+  }
+
+  .rich-editor-grip {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 1;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.86);
+    color: #71717a;
+  }
+
+  .rich-editor-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .rich-editor-list label {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    align-items: center;
+    gap: 8px;
+    color: #71717a;
+    font-weight: 900;
+  }
+
+  .rich-editor-list input,
+  .rich-editor-table input {
+    min-height: 40px;
+    width: 100%;
+    border: 1px solid rgb(228 228 231);
+    border-radius: 8px;
+    background: #fff;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 750;
+  }
+
+  .rich-editor-list button {
+    justify-self: start;
+    border-radius: 999px;
+    background: #fff1e8;
+    padding: 8px 12px;
+    color: #f05a28;
+    font-size: 12px;
+    font-weight: 950;
+  }
+
+  .rich-editor-table {
+    overflow-x: auto;
+  }
+
+  .rich-editor-table-row {
+    display: grid;
+    min-width: 520px;
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+
+  .rich-editor-table-row + .rich-editor-table-row input {
+    border-top: 0;
+  }
+
+  .rich-editor-table input {
+    border-radius: 0;
+  }
+
+  .tour-rich-content {
+    display: grid;
+    gap: 16px;
+    color: #27272a;
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.75;
+  }
+
+  .tour-rich-content h2 {
+    color: #18181b;
+    font-size: 24px;
+    font-weight: 950;
+    line-height: 1.25;
+  }
+
+  .tour-rich-content ul,
+  .tour-rich-content ol {
+    display: grid;
+    gap: 8px;
+    padding-left: 22px;
+  }
+
+  .tour-rich-content img,
+  .tour-rich-content video {
+    width: 100%;
+    border-radius: 8px;
+    box-shadow: 0 14px 34px rgb(24 24 27 / 0.10);
+  }
+
+  .tour-rich-content table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  .tour-rich-content td {
+    border: 1px solid rgb(228 228 231);
+    padding: 10px;
+  }
+
+  @media (max-width: 640px) {
+    .rich-editor-toolbar {
+      flex-wrap: nowrap;
+    }
+
+    .rich-editor-blocks {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .rich-editor-body,
+    .rich-editor-preview {
+      padding: 12px;
+    }
+
+    .rich-editor-block textarea.heading {
+      font-size: 20px;
+    }
+  }
+
   .agreement-stack {
     display: grid;
     gap: 24px;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
+import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, GripVertical, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
 import { cities, faqs, languages, tourTypes, tours, transports } from '../data/mockData.js';
 import { useAppState } from '../state/AppContext.jsx';
 import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
@@ -15,7 +15,8 @@ import { buildTourFormPayloadFromTour, fetchGuideTours, publishGuideTour, submit
 import { submitGuideApplication } from '../lib/guideApplications.js';
 import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
-import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
+import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
+import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
 
 const today = new Date().toISOString().slice(0, 10);
 const SEARCH_RESULTS_PAGE_SIZE = 12;
@@ -468,14 +469,6 @@ function FilterModal({ filters, filterOptions, onApply, onReset, onClose }) {
           </div>
         </section>
 
-        <section className="rounded-card border bg-white p-4">
-          <h3 className="font-black">가이드 거주 기간</h3>
-          <div className="mt-3 flex items-center gap-3">
-            <input className="w-full accent-primary" type="range" min="0" max="20" value={draft.guideYearsMin || 0} onChange={(event) => updateField('guideYearsMin', Number(event.target.value))} />
-            <span className="w-20 text-right font-black">{draft.guideYearsMin || 0}년+</span>
-          </div>
-        </section>
-
         <CheckGroup title="가이드 언어" chip items={languageItems} selected={draft.languages} onToggle={(item) => updateArray('languages', item)} />
         <CheckGroup title="이동수단" items={transportItems} selected={draft.transport} onToggle={(item) => updateArray('transport', item)} />
         <CheckGroup title="포함 옵션" items={optionItems} selected={draft.options} onToggle={(item) => updateArray('options', item)} labelFor={labelSearchOption} />
@@ -491,6 +484,12 @@ function FilterModal({ filters, filterOptions, onApply, onReset, onClose }) {
 
 function CheckGroup({ title, items, selected, onToggle, chip, labelFor = (item) => item }) {
   return <section className="rounded-card border bg-white p-4"><h3 className="font-black">{title}</h3><div className={`mt-3 flex flex-wrap gap-2 ${chip ? '' : 'grid sm:grid-cols-2'}`}>{items.map((item) => <button type="button" className={`min-h-11 rounded-full border px-4 font-bold ${selected.includes(item) ? 'border-primary bg-orange-50 text-primary' : 'bg-white'}`} key={item} onClick={() => onToggle(item)}>{labelFor(item)}</button>)}</div></section>;
+}
+
+function RichTourContent({ html, fallback }) {
+  const safeHtml = sanitizeTourContentHtml(html);
+  if (safeHtml) return <div className="tour-rich-content" dangerouslySetInnerHTML={{ __html: safeHtml }} />;
+  return <p>{fallback || '투어 설명이 아직 등록되지 않았습니다.'}</p>;
 }
 
 export function TourDetailPage() {
@@ -603,7 +602,7 @@ export function TourDetailPage() {
 
           <section className="tour-detail-section">
             <h2>투어 소개</h2>
-            <p>{tour.detailText || tour.description || '투어 설명이 아직 등록되지 않았습니다.'}</p>
+            <RichTourContent html={tour.contentHtml} fallback={tour.detailText || tour.description} />
           </section>
 
           <section className="tour-detail-section">
@@ -1402,9 +1401,17 @@ export function AccountSettingsPage() {
     const email = String(form.get('email') || '').trim();
     const password = String(form.get('password') || '');
     const confirmPassword = String(form.get('confirmPassword') || '');
+    const avatarFile = form.get('avatarFile');
     if (password && password !== confirmPassword) {
       setProfileNotice('비밀번호가 일치하지 않습니다.');
       return;
+    }
+    if (avatarFile?.size) {
+      const avatarValidation = validateGuideProfilePhoto(avatarFile);
+      if (!avatarValidation.ok) {
+        setProfileNotice(avatarValidation.error);
+        return;
+      }
     }
     try {
       const name = buildSignupDisplayName(firstName, lastName);
@@ -1416,13 +1423,19 @@ export function AccountSettingsPage() {
         const { error } = await client.auth.updateUser(authUpdates);
         if (error) throw error;
       }
+      let nextAvatar = state.auth.user.avatar;
+      let nextAvatarPath;
       if (getSupabaseConfig().isConfigured && state.auth.user?.id) {
         const client = await createBrowserSupabaseClient();
+        if (avatarFile?.size) {
+          nextAvatarPath = await uploadPublicAvatar(client, { userId: state.auth.user.id, file: avatarFile, prefix: 'avatar' });
+          nextAvatar = resolveAvatarUrl(client, nextAvatarPath);
+        }
         await updateMemberProfile(client, {
           profileId: state.auth.user.id,
           email: email || state.auth.user.email,
           displayName: name,
-          avatarPath: state.auth.user.avatar
+          avatarPath: nextAvatarPath
         });
       }
       dispatch({
@@ -1430,7 +1443,7 @@ export function AccountSettingsPage() {
         payload: {
           name,
           email,
-          avatar: state.auth.user.avatar
+          avatar: nextAvatar
         }
       });
       setProfileNotice('일반 회원 프로필이 저장됐습니다.');
@@ -1506,6 +1519,7 @@ export function AccountSettingsPage() {
               <AccountSettingsReadOnly user={state.auth.user} guideProfile={state.guideProfile} mode="member" />
             ) : (
               <form className="settings-auth-form mt-5" onSubmit={saveMemberProfile}>
+                <ProfilePhotoEditor name="avatarPreview" fileInputName="avatarFile" src={state.auth.user.avatar} label="Profile photo" />
                 <div className="auth-name-grid">
                   <label className="guide-field-label">First name<input className="guide-input mt-2" name="firstName" defaultValue={memberNameParts.firstName} autoComplete="given-name" required /></label>
                   <label className="guide-field-label">Last name<input className="guide-input mt-2" name="lastName" defaultValue={memberNameParts.lastName} autoComplete="family-name" required /></label>
@@ -1848,7 +1862,7 @@ function GuideProfileEditor({ profile, fallbackAvatar, onSubmit }) {
   );
 }
 
-function ProfilePhotoEditor({ name, fileNameName, src, label }) {
+function ProfilePhotoEditor({ name, fileNameName, fileInputName, src, label }) {
   const [preview, setPreview] = useState(src || '');
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
@@ -1875,7 +1889,7 @@ function ProfilePhotoEditor({ name, fileNameName, src, label }) {
       <b>{label}</b>
       <label className="inline-flex h-10 cursor-pointer items-center rounded-full border border-zinc-300 px-4 text-sm font-black text-zinc-700 hover:border-primary hover:text-primary">
         Change photo
-        <input className="sr-only" type="file" accept="image/*" onChange={handleFile} />
+        <input className="sr-only" name={fileInputName} type="file" accept="image/*" onChange={handleFile} />
       </label>
       <input type="hidden" name={name} value={preview} />
       {fileNameName && <input type="hidden" name={fileNameName} value={fileName} />}
@@ -2290,6 +2304,174 @@ export function GuideMyToursPage() {
   );
 }
 
+const richEditorEmojis = ['😊', '✨', '🍜', '☕', '📍', '🚶', '🚲', '🎧', '🌿', '🌆', '🧡', '⭐'];
+
+function RichContentEditor({ blocks, onChange, onUploadImage, onUploadVideo, onNotify }) {
+  const imageInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const [activeBlockId, setActiveBlockId] = useState(blocks[0]?.id ?? '');
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [listMenuOpen, setListMenuOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [draggingId, setDraggingId] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const activeBlock = blocks.find((block) => block.id === activeBlockId) ?? blocks[0];
+  const previewHtml = useMemo(() => serializeRichContentBlocks(blocks), [blocks]);
+
+  useEffect(() => {
+    if (!blocks.some((block) => block.id === activeBlockId)) setActiveBlockId(blocks[0]?.id ?? '');
+  }, [activeBlockId, blocks]);
+
+  const commitBlocks = (nextBlocks) => onChange(nextBlocks.length ? nextBlocks : [createEmptyRichContentBlock()]);
+  const updateBlock = (blockId, patch) => commitBlocks(blocks.map((block) => block.id === blockId ? { ...block, ...patch } : block));
+  const removeBlock = (blockId) => commitBlocks(blocks.filter((block) => block.id !== blockId));
+  const insertAfterActive = (block) => {
+    const index = Math.max(0, blocks.findIndex((item) => item.id === activeBlock?.id));
+    commitBlocks([...blocks.slice(0, index + 1), block, ...blocks.slice(index + 1)]);
+    setActiveBlockId(block.id);
+  };
+
+  const toggleMark = (mark) => {
+    if (!activeBlock || !['paragraph', 'heading'].includes(activeBlock.type)) return;
+    updateBlock(activeBlock.id, { [mark]: !activeBlock[mark] });
+  };
+
+  const toggleHeading = () => {
+    if (!activeBlock || !['paragraph', 'heading'].includes(activeBlock.type)) return;
+    updateBlock(activeBlock.id, { type: activeBlock.type === 'heading' ? 'paragraph' : 'heading' });
+  };
+
+  const insertEmoji = (emoji) => {
+    setEmojiOpen(false);
+    if (!activeBlock || !['paragraph', 'heading'].includes(activeBlock.type)) {
+      insertAfterActive({ ...createEmptyRichContentBlock(), text: emoji });
+      return;
+    }
+    updateBlock(activeBlock.id, { text: `${activeBlock.text || ''}${emoji}` });
+  };
+
+  const insertList = (ordered) => {
+    setListMenuOpen(false);
+    insertAfterActive({ ...createEmptyRichContentBlock('list'), ordered });
+  };
+
+  const addMediaBlocks = async (files, type) => {
+    const fileList = [...(files ?? [])];
+    if (!fileList.length) return;
+    setUploading(true);
+    try {
+      const mediaBlocks = [];
+      for (const file of fileList) {
+        if (type === 'image') {
+          const uploaded = await onUploadImage(file);
+          mediaBlocks.push({ id: `image-${Date.now()}-${mediaBlocks.length}`, type: 'image', url: uploaded.url, path: uploaded.path, alt: file.name });
+        } else {
+          const duration = await getVideoDuration(file);
+          validateVideoDuration(duration);
+          const uploaded = await onUploadVideo(file);
+          mediaBlocks.push({ id: `video-${Date.now()}-${mediaBlocks.length}`, type: 'video', url: uploaded.url, path: uploaded.path, title: file.name });
+        }
+      }
+      const index = Math.max(0, blocks.findIndex((item) => item.id === activeBlock?.id));
+      commitBlocks([...blocks.slice(0, index + 1), ...mediaBlocks, ...blocks.slice(index + 1)]);
+      setActiveBlockId(mediaBlocks.at(-1)?.id ?? activeBlockId);
+    } catch (error) {
+      onNotify(error?.message || '콘텐츠 파일을 업로드하지 못했습니다.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const files = [...(event.dataTransfer.files ?? [])];
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    const videoFiles = files.filter((file) => file.type.startsWith('video/'));
+    if (imageFiles.length) addMediaBlocks(imageFiles, 'image');
+    if (videoFiles.length) addMediaBlocks(videoFiles, 'video');
+  };
+
+  const moveDraggedBlock = (targetId) => {
+    if (!draggingId || draggingId === targetId) return;
+    const fromIndex = blocks.findIndex((block) => block.id === draggingId);
+    const toIndex = blocks.findIndex((block) => block.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const nextBlocks = [...blocks];
+    const [dragged] = nextBlocks.splice(fromIndex, 1);
+    nextBlocks.splice(toIndex, 0, dragged);
+    commitBlocks(nextBlocks);
+  };
+
+  const updateListItem = (block, itemIndex, value) => {
+    updateBlock(block.id, { items: block.items.map((item, index) => index === itemIndex ? value : item) });
+  };
+
+  const updateTableCell = (block, rowIndex, cellIndex, value) => {
+    updateBlock(block.id, {
+      rows: block.rows.map((row, currentRow) => currentRow === rowIndex
+        ? row.map((cell, currentCell) => currentCell === cellIndex ? value : cell)
+        : row)
+    });
+  };
+
+  return (
+    <div className="rich-editor">
+      <div className="rich-editor-toolbar" aria-label="Editor toolbar">
+        <button type="button" className={activeBlock?.bold ? 'active' : ''} aria-label="Bold" title="Bold" onClick={() => toggleMark('bold')}><Bold size={17} /></button>
+        <button type="button" className={activeBlock?.italic ? 'active' : ''} aria-label="Italic" title="Italic" onClick={() => toggleMark('italic')}><Italic size={17} /></button>
+        <button type="button" className={activeBlock?.type === 'heading' ? 'active' : ''} aria-label="Text size" title="Text size" onClick={toggleHeading}><Type size={17} /></button>
+        <div className="rich-editor-menu">
+          <button type="button" aria-label="List" title="List" onClick={() => setListMenuOpen((value) => !value)}><List size={17} /></button>
+          {listMenuOpen && <div className="rich-editor-popover"><button type="button" onClick={() => insertList(false)}>글머리 목록</button><button type="button" onClick={() => insertList(true)}>번호 목록</button></div>}
+        </div>
+        <button type="button" aria-label="Table" title="Table" onClick={() => insertAfterActive(createEmptyRichContentBlock('table'))}><Table2 size={17} /></button>
+        <div className="rich-editor-menu">
+          <button type="button" aria-label="Emoji" title="Emoji" onClick={() => setEmojiOpen((value) => !value)}><SmilePlus size={17} /></button>
+          {emojiOpen && <div className="rich-editor-emoji-grid">{richEditorEmojis.map((emoji) => <button type="button" key={emoji} onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</div>}
+        </div>
+        <button type="button" aria-label="Photo" title="Photo" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /></button>
+        <button type="button" aria-label="Short video" title="Short video" onClick={() => videoInputRef.current?.click()}><Video size={17} /></button>
+        <button type="button" className={previewMode ? 'active wide' : 'wide'} onClick={() => setPreviewMode((value) => !value)}>여행자 화면 미리보기</button>
+        <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { addMediaBlocks(event.target.files, 'image'); event.target.value = ''; }} />
+        <input ref={videoInputRef} type="file" accept="video/*" multiple hidden onChange={(event) => { addMediaBlocks(event.target.files, 'video'); event.target.value = ''; }} />
+      </div>
+
+      {previewMode ? (
+        <div className="rich-editor-preview"><RichTourContent html={previewHtml} fallback="미리볼 콘텐츠를 입력해 주세요." /></div>
+      ) : (
+        <div className="rich-editor-body">
+          <div className={`rich-editor-dropzone ${uploading ? 'busy' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop} onClick={() => imageInputRef.current?.click()}>
+            <Upload size={18} />
+            <span>{uploading ? '업로드 중...' : '사진이나 30초 이내 영상을 끌어오거나 클릭해서 추가'}</span>
+          </div>
+          <div className="rich-editor-blocks">
+            {blocks.map((block) => (
+              <section
+                className={`rich-editor-block ${activeBlockId === block.id ? 'active' : ''} ${block.type === 'image' || block.type === 'video' ? 'media' : ''}`}
+                key={block.id}
+                draggable={block.type === 'image' || block.type === 'video'}
+                onClick={() => setActiveBlockId(block.id)}
+                onDragStart={() => setDraggingId(block.id)}
+                onDragEnd={() => setDraggingId('')}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => moveDraggedBlock(block.id)}
+              >
+                {(block.type === 'image' || block.type === 'video') && <GripVertical className="rich-editor-grip" size={16} />}
+                {block.type === 'heading' || block.type === 'paragraph' ? <textarea className={block.type === 'heading' ? 'heading' : ''} value={block.text} rows={block.type === 'heading' ? 1 : 4} placeholder={block.type === 'heading' ? '제목을 입력하세요' : '여행자에게 보여줄 설명을 입력하세요'} onChange={(event) => updateBlock(block.id, { text: event.target.value })} /> : null}
+                {block.type === 'list' ? <div className="rich-editor-list">{block.items.map((item, index) => <label key={`${block.id}-${index}`}><span>{block.ordered ? `${index + 1}.` : '•'}</span><input value={item} onChange={(event) => updateListItem(block, index, event.target.value)} placeholder="목록 내용" /></label>)}<button type="button" onClick={() => updateBlock(block.id, { items: [...block.items, ''] })}>항목 추가</button></div> : null}
+                {block.type === 'table' ? <div className="rich-editor-table">{block.rows.map((row, rowIndex) => <div className="rich-editor-table-row" key={`${block.id}-${rowIndex}`}>{row.map((cell, cellIndex) => <input key={`${block.id}-${rowIndex}-${cellIndex}`} value={cell} onChange={(event) => updateTableCell(block, rowIndex, cellIndex, event.target.value)} />)}</div>)}</div> : null}
+                {block.type === 'image' ? <img className="rich-editor-media" src={block.url} alt={block.alt || ''} /> : null}
+                {block.type === 'video' ? <video className="rich-editor-media" src={block.url} controls preload="metadata" /> : null}
+                <button className="rich-editor-delete" type="button" aria-label="Delete block" onClick={() => removeBlock(block.id)}><Trash2 size={16} /></button>
+              </section>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TourCreatePage() {
   const { state, dispatch } = useAppState();
   const [searchParams] = useSearchParams();
@@ -2300,10 +2482,13 @@ export function TourCreatePage() {
   const [editPayload, setEditPayload] = useState(null);
   const formSource = editPayload ?? draft ?? null;
   const [draftId] = useState(() => draft?.id ?? `tour-draft-${Date.now()}`);
+  const formRef = useRef(null);
+  const autoSaveSkipRef = useRef(true);
   const [agree, setAgree] = useState(formSource?.agreements ?? [false, false, false]);
   const [pricingMode, setPricingMode] = useState(formSource?.paymentType ?? 'pay_as_you_go');
   const [hourlyPrice, setHourlyPrice] = useState(formSource?.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
-  const [editorHtml, setEditorHtml] = useState(formSource?.contentHtml ?? '');
+  const [editorBlocks, setEditorBlocks] = useState(() => createInitialRichContentBlocks(formSource?.contentHtml ?? ''));
+  const editorHtml = useMemo(() => serializeRichContentBlocks(editorBlocks), [editorBlocks]);
   const [draftNotice, setDraftNotice] = useState('');
   const [draftBusy, setDraftBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -2337,7 +2522,8 @@ export function TourCreatePage() {
     setAgree(formSource.agreements ?? [true, true, true]);
     setPricingMode(formSource.paymentType ?? 'pay_as_you_go');
     setHourlyPrice(formSource.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
-    setEditorHtml(formSource.contentHtml ?? '');
+    setEditorBlocks(createInitialRichContentBlocks(formSource.contentHtml ?? ''));
+    autoSaveSkipRef.current = true;
   }, [formSource?.id]);
 
   const handleSubmit = async (event) => {
@@ -2393,6 +2579,40 @@ export function TourCreatePage() {
       setDraftBusy(false);
     }
   };
+  const showEditorNotice = (message) => {
+    setDraftNotice(message);
+    dispatch({ type: 'SHOW_TOAST', payload: { message } });
+  };
+  const uploadEditorImage = async (file) => {
+    validateGuideProfilePhoto(file);
+    if (!getSupabaseConfig().isConfigured) {
+      const url = URL.createObjectURL(file);
+      return { path: url, url };
+    }
+    const client = await createBrowserSupabaseClient();
+    return uploadTourContentImage(client, state.auth.user?.id, file);
+  };
+  const uploadEditorVideo = async (file) => {
+    if (!getSupabaseConfig().isConfigured) {
+      const url = URL.createObjectURL(file);
+      return { path: url, url };
+    }
+    const client = await createBrowserSupabaseClient();
+    return uploadTourContentVideo(client, state.auth.user?.id, file);
+  };
+
+  useEffect(() => {
+    if (autoSaveSkipRef.current) {
+      autoSaveSkipRef.current = false;
+      return undefined;
+    }
+    const formElement = formRef.current;
+    if (!formElement || draftBusy || publishBusy) return undefined;
+    const timer = window.setTimeout(() => {
+      saveTourDraft(formElement);
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [editorHtml]);
 
   return (
     <main className="tour-create-shell">
@@ -2404,7 +2624,7 @@ export function TourCreatePage() {
         <Link className="tour-create-back" to={isEditMode ? '/mypage/guide-mode/tours' : '/mypage/guide-mode'}>{isEditMode ? 'Back to my tours' : 'Back to guide mode'}</Link>
       </div>
 
-      <form className="tour-create-form" onSubmit={handleSubmit} key={formSource?.id ?? draftId}>
+      <form className="tour-create-form" onSubmit={handleSubmit} key={formSource?.id ?? draftId} ref={formRef}>
         <section className="tour-guide-strip">
           <ProfileAvatar src={guideAvatar} className="h-14 w-14 text-primary" />
           <div className="tour-guide-info-body">
@@ -2517,30 +2737,14 @@ export function TourCreatePage() {
             <span>04</span>
             <h2>Tour content</h2>
           </div>
-          <div className="mini-editor">
-            <div className="mini-editor-toolbar" aria-label="Editor toolbar">
-              {[['Bold', Bold], ['Italic', Italic], ['Text size', Type], ['List', List], ['Table', Table2], ['Emoji', SmilePlus], ['Photo', ImagePlus], ['Short video', Video]].map(([label, Icon]) => (
-                <button type="button" aria-label={label} title={label} key={label}><Icon size={17} /></button>
-              ))}
-              <label className="mini-editor-upload" title="Add photo">
-                <ImagePlus size={17} />
-                <input type="file" accept="image/*" name="contentImages" multiple />
-              </label>
-              <label className="mini-editor-upload" title="Add short video">
-                <Video size={17} />
-                <input type="file" accept="video/*" name="contentVideos" multiple />
-              </label>
-            </div>
-            <div
-              className="mini-editor-surface"
-              contentEditable
-              suppressContentEditableWarning
-              onInput={(event) => setEditorHtml(event.currentTarget.innerHTML)}
-              data-placeholder="Add tour text, photos, emojis, tables, and short videos around 30 seconds."
-              dangerouslySetInnerHTML={{ __html: editorHtml }}
-            />
-            <input type="hidden" name="contentHtml" value={editorHtml} />
-          </div>
+          <RichContentEditor
+            blocks={editorBlocks}
+            onChange={setEditorBlocks}
+            onUploadImage={uploadEditorImage}
+            onUploadVideo={uploadEditorVideo}
+            onNotify={showEditorNotice}
+          />
+          <input type="hidden" name="contentHtml" value={editorHtml} />
         </section>
 
         <section className="tour-form-section">

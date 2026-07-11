@@ -9,9 +9,11 @@ import {
   mapAuthUser,
   mapGuideProfile,
   resolveAvatarUrl,
+  resolveGuideProfileImageUrl,
   resolvePublicStorageUrl,
   signInWithEmail,
-  signUpWithEmail
+  signUpWithEmail,
+  uploadPublicAvatar
 } from '../lib/supabaseAuth.js';
 
 test('getSupabaseConfig falls back to public deployment values without Vite env', () => {
@@ -55,7 +57,7 @@ test('mapGuideProfile keeps the approved guide profile id for tour publishing', 
     city: 'Seoul',
     languages: ['Korean', 'English'],
     intro: 'Intro',
-    profile_image_path: 'profile.jpg',
+    profile_image_path: 'avatars/user-1/profile.jpg',
     status: 'active'
   }), {
     id: 'guide-profile-1',
@@ -71,10 +73,43 @@ test('mapGuideProfile keeps the approved guide profile id for tour publishing', 
     additionalLanguages: ['English'],
     languageLevels: {},
     intro: 'Intro',
-    profilePhotoUrl: 'profile.jpg',
+    profilePhotoUrl: 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user-1/profile.jpg',
     profilePhotoName: '',
     status: 'active'
   });
+});
+
+test('resolveGuideProfileImageUrl renders public avatar paths and rejects private verification paths', () => {
+  assert.equal(
+    resolveGuideProfileImageUrl(null, 'avatars/user 1/guide.png'),
+    'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user%201/guide.png'
+  );
+  assert.equal(resolveGuideProfileImageUrl(null, 'https://cdn.example.com/guide.png'), 'https://cdn.example.com/guide.png');
+  assert.equal(resolveGuideProfileImageUrl(null, 'guide-verification/user-1/profile.png', 'fallback-avatar'), 'fallback-avatar');
+  assert.equal(resolveGuideProfileImageUrl(null, 'user-1/guide-profile-123-profile.png', 'fallback-avatar'), 'fallback-avatar');
+});
+
+test('uploadPublicAvatar stores files in the public avatars bucket', async () => {
+  const calls = [];
+  const file = { name: 'guide photo.png', size: 2048, type: 'image/png' };
+  const client = {
+    storage: {
+      from: (bucket) => ({
+        upload: async (path, uploadFile, options) => {
+          calls.push([bucket, path, uploadFile, options]);
+          return { error: null };
+        }
+      })
+    }
+  };
+
+  const path = await uploadPublicAvatar(client, { userId: 'user-1', file, prefix: 'guide-avatar', includeBucketPrefix: true });
+
+  assert.match(path, /^avatars\/user-1\/guide-avatar-\d+-guide-photo\.png$/);
+  assert.equal(calls[0][0], 'avatars');
+  assert.match(calls[0][1], /^user-1\/guide-avatar-\d+-guide-photo\.png$/);
+  assert.equal(calls[0][2], file);
+  assert.deepEqual(calls[0][3], { upsert: true });
 });
 
 test('resolveAvatarUrl keeps already-renderable avatar values', () => {

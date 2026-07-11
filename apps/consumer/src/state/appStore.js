@@ -174,6 +174,8 @@ export function appReducer(state, action) {
       );
     case 'CLEAR_TOAST':
       return { ...state, toast: null };
+    case 'SHOW_TOAST':
+      return toast(state, action.payload.message);
     case 'SET_CURRENCY':
       return toast({ ...state, currency: action.payload.currency }, `Currency changed to ${action.payload.currency}`);
     case 'UPDATE_ACCOUNT_SETTINGS': {

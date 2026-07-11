@@ -1,3 +1,5 @@
+import { resolveGuideProfileImageUrl, uploadPublicAvatar } from './supabaseAuth.js';
+
 function requireValue(value, message) {
   if (!String(value ?? '').trim()) throw new Error(message);
   return String(value).trim();
@@ -200,7 +202,7 @@ export const homepageTourSectionDefinitions = [
 
 export function mapGuideRecord(profile = {}) {
   const profileAvatarPath = profile.profiles?.avatar_path || profile.avatar_path || '';
-  const fallbackImage = isRenderableImageUrl(profile.profile_image_path) ? profile.profile_image_path : '';
+  const fallbackImage = resolveGuideProfileImageUrl(null, profile.profile_image_path || '');
   return {
     id: profile.id,
     name: profile.display_name || 'Local guide',
@@ -473,19 +475,19 @@ function cleanStorageFileName(name = 'profile-photo') {
 
 async function uploadGuideProfilePhoto(client, { userId, file }) {
   if (!file?.size) return '';
-  const path = `${requireValue(userId, 'A profile id is required.')}/guide-profile-${Date.now()}-${cleanStorageFileName(file.name)}`;
-  const { error } = await client.storage
-    .from('guide-verification')
-    .upload(path, file, { upsert: true });
-  throwIfError(error);
-  return path;
+  return uploadPublicAvatar(client, {
+    userId: requireValue(userId, 'A profile id is required.'),
+    file,
+    prefix: 'guide-avatar',
+    includeBucketPrefix: true
+  });
 }
 
-export async function updateGuideProfile(client, { guideProfileId, userId, displayName, payload, formElement, currentProfile = {} }) {
+export async function updateGuideProfile(client, { guideProfileId, userId, displayName, payload, formElement, currentProfile = {}, profilePhotoFile = null }) {
   const form = formElement ? new FormData(formElement) : null;
-  const selectedPhoto = form?.get('profilePhoto');
+  const selectedPhoto = profilePhotoFile || form?.get('profilePhoto');
   const uploadedPhotoPath = await uploadGuideProfilePhoto(client, { userId, file: selectedPhoto });
-  const existingPhotoPath = currentProfile.profilePhotoUrl && !String(currentProfile.profilePhotoUrl).startsWith('data:')
+  const existingPhotoPath = resolveGuideProfileImageUrl(null, currentProfile.profilePhotoUrl || '') && !String(currentProfile.profilePhotoUrl).startsWith('data:')
     ? currentProfile.profilePhotoUrl
     : '';
   const profileImagePath = uploadedPhotoPath || existingPhotoPath || '';

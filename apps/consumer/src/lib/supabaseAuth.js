@@ -39,6 +39,11 @@ function isRenderableAvatarUrl(value = '') {
   return /^(https?:|data:|blob:)/i.test(String(value));
 }
 
+function isPrivateGuideVerificationPath(value = '') {
+  const path = String(value || '').trim();
+  return Boolean(path && !isRenderableAvatarUrl(path) && (path.startsWith('guide-verification/') || path.includes('/guide-profile-')));
+}
+
 function encodeStoragePath(path = '') {
   return String(path)
     .split('/')
@@ -64,6 +69,15 @@ export function resolveAvatarUrl(client, avatarPath = '') {
   return result?.data?.publicUrl || resolvePublicStorageUrl('avatars', path);
 }
 
+export function resolveGuideProfileImageUrl(client, profileImagePath = '', fallback = '') {
+  const path = String(profileImagePath || '').trim();
+  if (!path) return fallback;
+  if (isPrivateGuideVerificationPath(path)) return fallback;
+  if (isRenderableAvatarUrl(path)) return path;
+  if (!path.startsWith('avatars/')) return fallback;
+  return resolveAvatarUrl(client, path);
+}
+
 function resolveProfileAvatar(client, profile = null) {
   if (!profile?.avatar_path) return profile;
   return {
@@ -74,12 +88,17 @@ function resolveProfileAvatar(client, profile = null) {
 
 async function uploadSignupAvatar(client, { userId, avatarFile }) {
   if (!avatarFile?.size) return '';
-  const path = `${userId}/avatar-${Date.now()}-${cleanStorageFileName(avatarFile.name)}`;
+  return uploadPublicAvatar(client, { userId, file: avatarFile, prefix: 'avatar' });
+}
+
+export async function uploadPublicAvatar(client, { userId, file, prefix = 'avatar', includeBucketPrefix = false }) {
+  if (!file?.size) return '';
+  const path = `${userId}/avatar-${Date.now()}-${cleanStorageFileName(file.name)}`.replace('/avatar-', `/${prefix}-`);
   const { error } = await client.storage
     .from('avatars')
-    .upload(path, avatarFile, { upsert: true });
+    .upload(path, file, { upsert: true });
   if (error) throw error;
-  return path;
+  return includeBucketPrefix ? `avatars/${path}` : path;
 }
 
 export function mapAuthUser(authUser, profile = null) {
@@ -115,7 +134,7 @@ export function mapGuideProfile(profile = null) {
     additionalLanguages,
     languageLevels: metadata.languageLevels ?? {},
     intro: profile.intro,
-    profilePhotoUrl: profile.profile_image_path || '',
+    profilePhotoUrl: resolveGuideProfileImageUrl(null, profile.profile_image_path || ''),
     profilePhotoName: metadata.profilePhotoName || '',
     status: profile.status
   };
