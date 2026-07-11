@@ -2430,6 +2430,7 @@ function RichContentEditor({ blocks, onChange, onUploadImage, onUploadVideo, onN
           {emojiOpen && <div className="rich-editor-emoji-grid">{richEditorEmojis.map((emoji) => <button type="button" key={emoji} onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</div>}
         </div>
         <button type="button" aria-label="Photo" title="Photo" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /></button>
+        <button type="button" className="wide media-action" onClick={() => imageInputRef.current?.click()}><ImagePlus size={16} />사진 추가</button>
         <button type="button" aria-label="Short video" title="Short video" onClick={() => videoInputRef.current?.click()}><Video size={17} /></button>
         <button type="button" className={previewMode ? 'active wide' : 'wide'} onClick={() => setPreviewMode((value) => !value)}>여행자 화면 미리보기</button>
         <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { addMediaBlocks(event.target.files, 'image'); event.target.value = ''; }} />
@@ -2443,6 +2444,10 @@ function RichContentEditor({ blocks, onChange, onUploadImage, onUploadVideo, onN
           <div className={`rich-editor-dropzone ${uploading ? 'busy' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop} onClick={() => imageInputRef.current?.click()}>
             <Upload size={18} />
             <span>{uploading ? '업로드 중...' : '사진이나 30초 이내 영상을 끌어오거나 클릭해서 추가'}</span>
+            <button type="button" className="rich-editor-add-photo" onClick={(event) => { event.stopPropagation(); imageInputRef.current?.click(); }}>
+              <ImagePlus size={16} />
+              사진 추가
+            </button>
           </div>
           <div className="rich-editor-blocks">
             {blocks.map((block) => (
@@ -2650,21 +2655,6 @@ export function TourCreatePage() {
         <section className="tour-form-section">
           <div className="tour-section-title">
             <span>01</span>
-            <h2>Product basics</h2>
-          </div>
-          <div className="tour-basic-grid">
-            <label className="tour-field">Title<input name="title" placeholder="Evening market walk in Seoul" defaultValue={formSource?.title ?? ''} required /></label>
-            <label className="tour-field">Tour type<select name="type" defaultValue={formSource?.typeValue ?? tourTypes[0]}>{tourTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-            <label className="tour-field">City<input name="city" placeholder="Seoul" defaultValue={formSource?.city ?? state.guideProfile?.city ?? ''} required /></label>
-            <label className="tour-field">Duration minutes<input name="durationMinutes" type="number" min="30" step="15" defaultValue={formSource?.durationMinutes ?? 60} required /></label>
-            <label className="tour-field">Max people<input name="maxPeople" type="number" min="1" step="1" defaultValue={formSource?.maxPeople ?? 1} required /></label>
-            <label className="tour-field wide">Short description<textarea name="description" placeholder="Describe what travelers will experience." defaultValue={formSource?.description ?? ''} required /></label>
-          </div>
-        </section>
-
-        <section className="tour-form-section">
-          <div className="tour-section-title">
-            <span>02</span>
             <h2>Pricing</h2>
           </div>
           <div className="pricing-mode-grid">
@@ -2715,7 +2705,37 @@ export function TourCreatePage() {
 
         <section className="tour-form-section">
           <div className="tour-section-title">
+            <span>02</span>
+            <h2>Product basics</h2>
+          </div>
+          <div className="tour-basic-grid">
+            <label className="tour-field">Title<input name="title" placeholder="Evening market walk in Seoul" defaultValue={formSource?.title ?? ''} required /></label>
+            <label className="tour-field">Tour type<select name="type" defaultValue={formSource?.typeValue ?? tourTypes[0]}>{tourTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+            <label className="tour-field">City<input name="city" placeholder="Seoul" defaultValue={formSource?.city ?? state.guideProfile?.city ?? ''} required /></label>
+            <label className="tour-field">Duration minutes<input name="durationMinutes" type="number" min="30" step="15" defaultValue={formSource?.durationMinutes ?? 60} required /></label>
+            <label className="tour-field">Max people<input name="maxPeople" type="number" min="1" step="1" defaultValue={formSource?.maxPeople ?? 1} required /></label>
+            <label className="tour-field wide">Short description<textarea name="description" placeholder="Describe what travelers will experience." defaultValue={formSource?.description ?? ''} required /></label>
+          </div>
+        </section>
+
+        <section className="tour-form-section">
+          <div className="tour-section-title">
             <span>03</span>
+            <h2>Tour content</h2>
+          </div>
+          <RichContentEditor
+            blocks={editorBlocks}
+            onChange={setEditorBlocks}
+            onUploadImage={uploadEditorImage}
+            onUploadVideo={uploadEditorVideo}
+            onNotify={showEditorNotice}
+          />
+          <input type="hidden" name="contentHtml" value={editorHtml} />
+        </section>
+
+        <section className="tour-form-section">
+          <div className="tour-section-title">
+            <span>04</span>
             <h2>Options</h2>
           </div>
           <div className="tour-option-grid">
@@ -2730,21 +2750,6 @@ export function TourCreatePage() {
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="tour-form-section">
-          <div className="tour-section-title">
-            <span>04</span>
-            <h2>Tour content</h2>
-          </div>
-          <RichContentEditor
-            blocks={editorBlocks}
-            onChange={setEditorBlocks}
-            onUploadImage={uploadEditorImage}
-            onUploadVideo={uploadEditorVideo}
-            onNotify={showEditorNotice}
-          />
-          <input type="hidden" name="contentHtml" value={editorHtml} />
         </section>
 
         <section className="tour-form-section">

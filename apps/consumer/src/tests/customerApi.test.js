@@ -185,6 +185,24 @@ test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
   assert.deepEqual(tour.options, { pickup: true });
 });
 
+test('mapTourRecord keeps guide avatars out of tour card main images', () => {
+  const tour = mapTourRecord({
+    id: 'tour-without-images',
+    title: 'No cover tour',
+    city: 'Seoul',
+    guide_profiles: {
+      display_name: 'kyeong kim',
+      profiles: { avatar_path: 'user-1/avatar.png' }
+    },
+    tour_images: []
+  });
+
+  assert.equal(tour.image, '');
+  assert.equal(tour.thumbnail, '');
+  assert.deepEqual(tour.gallery, []);
+  assert.equal(tour.guide.avatar, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user-1/avatar.png');
+});
+
 test('mapTourRecord prepares real tour detail fields for the detail page', () => {
   const tour = mapTourRecord({
     id: 'tour-detail-1',
