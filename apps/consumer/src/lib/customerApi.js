@@ -7,6 +7,25 @@ function throwIfError(error) {
   if (error) throw error;
 }
 
+function isRenderableImageUrl(value = '') {
+  return /^(https?:|data:|blob:)/i.test(String(value));
+}
+
+function encodeStoragePath(path = '') {
+  return String(path)
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+}
+
+export function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseUrl = 'https://qrabzkcibqaslealvdar.supabase.co') {
+  const path = String(storagePath || '').trim();
+  if (!path || isRenderableImageUrl(path)) return path;
+  const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
+  return `${String(supabaseUrl).replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
+}
+
 export const homepageTourSectionDefinitions = [
   { key: 'popular', size: 4 },
   { key: 'recommended', size: 4 },
@@ -15,6 +34,8 @@ export const homepageTourSectionDefinitions = [
 ];
 
 export function mapGuideRecord(profile = {}) {
+  const profileAvatarPath = profile.profiles?.avatar_path || profile.avatar_path || '';
+  const fallbackImage = isRenderableImageUrl(profile.profile_image_path) ? profile.profile_image_path : '';
   return {
     id: profile.id,
     name: profile.display_name || 'Local guide',
@@ -23,13 +44,14 @@ export function mapGuideRecord(profile = {}) {
     years: profile.residence_years ?? 0,
     rating: Number(profile.rating_avg ?? 0),
     reviews: Number(profile.review_count ?? 0),
-    avatar: profile.profile_image_path || ''
+    avatar: resolvePublicStorageImageUrl('avatars', profileAvatarPath) || fallbackImage
   };
 }
 
 export function mapTourRecord(record = {}) {
   const images = [...(record.tour_images ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   const guide = mapGuideRecord(record.guide_profiles ?? record.guide ?? {});
+  const imagePaths = images.map((image) => resolvePublicStorageImageUrl('tour-images', image.image_path));
   return {
     id: record.id,
     title: record.title,
@@ -43,9 +65,9 @@ export function mapTourRecord(record = {}) {
     durationMinutes: Number(record.duration_minutes ?? 0),
     maxPeople: Number(record.max_people ?? 1),
     status: record.status,
-    image: images[0]?.image_path || guide.avatar || '',
-    thumbnail: images[0]?.image_path || guide.avatar || '',
-    gallery: images.map((image) => image.image_path),
+    image: imagePaths[0] || guide.avatar || '',
+    thumbnail: imagePaths[0] || guide.avatar || '',
+    gallery: imagePaths,
     options: record.options ?? {},
     transport: record.transport ?? [],
     guide,
@@ -194,7 +216,7 @@ export function mapConversationRecord(record = {}, currentUserId = '') {
 export async function fetchActiveTours(client, { city = '', filters = {} } = {}) {
   let query = client
     .from('tours')
-    .select('*, guide_profiles!inner(*), tour_images(*)')
+    .select('*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*)')
     .eq('status', 'active')
     .eq('guide_profiles.status', 'active');
   if (city) query = query.ilike('city', city);
@@ -207,7 +229,7 @@ export async function fetchActiveTours(client, { city = '', filters = {} } = {})
 export async function fetchTourById(client, tourId) {
   const { data, error } = await client
     .from('tours')
-    .select('*, guide_profiles(*), tour_images(*), reviews(*)')
+    .select('*, guide_profiles(*, profiles(avatar_path)), tour_images(*), reviews(*)')
     .eq('id', requireValue(tourId, 'A tour id is required.'))
     .single();
   throwIfError(error);

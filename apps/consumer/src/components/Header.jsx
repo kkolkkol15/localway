@@ -8,6 +8,7 @@ import { useAppState } from '../state/AppContext.jsx';
 import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
 import { isRegisteredGuideRole } from '../state/appStore.js';
 import { formatUnreadBadge } from '../lib/messageBadge.js';
+import { resolveAvatarUrl } from '../lib/supabaseAuth.js';
 
 const languageRegions = [
   { code: 'ko', flag: '🇰🇷', language: '한국어', region: '대한민국', currency: 'KRW' },
@@ -69,7 +70,9 @@ export function Header() {
   const [lang, setLang] = useState(false);
   const [localeTab, setLocaleTab] = useState('language');
   const [notice, setNotice] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const noticeRef = useRef(null);
+  const profileAvatarSrc = resolveAvatarUrl(null, state.auth.user?.avatar);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -79,6 +82,10 @@ export function Header() {
     document.addEventListener('mousedown', closeOnOutsideClick);
     return () => document.removeEventListener('mousedown', closeOnOutsideClick);
   }, [notice]);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [profileAvatarSrc]);
 
   function goProtected(path) {
     if (!state.auth.isAuthenticated) navigate(`/login?redirect=${encodeURIComponent(path)}`);
@@ -117,7 +124,7 @@ export function Header() {
           <button className="icon-btn" onClick={() => setLang(true)} aria-label="Language and currency"><Globe2 size={21} /></button>
           {state.auth.isAuthenticated ? (
             <button className="ml-1 h-11 w-11 overflow-hidden rounded-full bg-primary text-cream" onClick={() => navigate('/mypage')} aria-label="Profile">
-              {state.auth.user.avatar ? <img className="h-full w-full object-cover" src={state.auth.user.avatar} alt="" /> : <UserRound className="mx-auto" />}
+              {profileAvatarSrc && !avatarLoadFailed ? <img className="h-full w-full object-cover" src={profileAvatarSrc} alt="" onError={() => setAvatarLoadFailed(true)} /> : <UserRound className="mx-auto" />}
             </button>
           ) : (
             <button className="hidden h-11 rounded-full border border-zinc-300 px-5 font-bold sm:block" onClick={() => navigate('/login')}>{t('nav.login')}</button>

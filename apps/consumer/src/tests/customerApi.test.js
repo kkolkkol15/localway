@@ -10,6 +10,7 @@ import {
   buildHomepageTourSections,
   fetchActiveTours,
   mapConversationRecord,
+  resolvePublicStorageImageUrl,
   mapTourRecord,
   updateGuideProfile,
   updateMemberProfile,
@@ -39,17 +40,31 @@ test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
       languages: ['Korean', 'English'],
       rating_avg: 4.8,
       review_count: 12,
-      profile_image_path: 'profile.png'
+      profile_image_path: 'profile.png',
+      profiles: { avatar_path: 'user-1/avatar.png' }
     },
     tour_images: [{ image_path: 'one.png', sort_order: 0 }, { image_path: 'two.png', sort_order: 1 }]
   });
 
+  const expectedTourImage = 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/one.png';
   assert.equal(tour.id, 'tour-1');
   assert.equal(tour.price, 25);
-  assert.equal(tour.image, 'one.png');
+  assert.equal(tour.image, expectedTourImage);
   assert.equal(tour.guide.name, 'Mina');
-  assert.deepEqual(tour.gallery, ['one.png', 'two.png']);
+  assert.equal(tour.guide.avatar, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user-1/avatar.png');
+  assert.deepEqual(tour.gallery, [
+    expectedTourImage,
+    'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/two.png'
+  ]);
   assert.deepEqual(tour.options, { pickup: true });
+});
+
+test('resolvePublicStorageImageUrl preserves URLs and converts storage paths', () => {
+  assert.equal(resolvePublicStorageImageUrl('avatars', 'https://cdn.example.com/a.png'), 'https://cdn.example.com/a.png');
+  assert.equal(
+    resolvePublicStorageImageUrl('avatars', 'avatars/user 1/photo.png', 'https://project.supabase.co'),
+    'https://project.supabase.co/storage/v1/object/public/avatars/user%201/photo.png'
+  );
 });
 
 test('buildHomepageTourSections distributes shuffled tours without duplicates when there are enough tours', () => {
@@ -125,7 +140,7 @@ test('fetchActiveTours selects active tours from active guide profiles only', as
 
   assert.deepEqual(calls, [
     ['from', 'tours'],
-    ['select', '*, guide_profiles!inner(*), tour_images(*)'],
+    ['select', '*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*)'],
     ['eq', 'status', 'active'],
     ['eq', 'guide_profiles.status', 'active'],
     ['order', 'created_at', { ascending: false }]

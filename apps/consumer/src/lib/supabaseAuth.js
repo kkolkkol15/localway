@@ -5,7 +5,7 @@ const defaultSupabaseConfig = {
   publishableKey: 'sb_publishable_QYusbitKD__5tfmQSLzNbg_Tb3wrVMa'
 };
 
-export function getSupabaseConfig(env = import.meta.env) {
+export function getSupabaseConfig(env = import.meta.env ?? {}) {
   const url = env.VITE_SUPABASE_URL ?? defaultSupabaseConfig.url;
   const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY ?? defaultSupabaseConfig.publishableKey;
   return { url, publishableKey, isConfigured: Boolean(url && publishableKey) };
@@ -39,12 +39,29 @@ function isRenderableAvatarUrl(value = '') {
   return /^(https?:|data:|blob:)/i.test(String(value));
 }
 
+function encodeStoragePath(path = '') {
+  return String(path)
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+}
+
+export function resolvePublicStorageUrl(bucket, storagePath = '', env = import.meta.env ?? {}) {
+  const path = String(storagePath || '').trim();
+  if (!path || isRenderableAvatarUrl(path)) return path;
+  const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
+  const config = getSupabaseConfig(env);
+  if (!config.url) return path;
+  return `${config.url.replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
+}
+
 export function resolveAvatarUrl(client, avatarPath = '') {
   const path = String(avatarPath || '').trim();
   if (!path || isRenderableAvatarUrl(path)) return path;
   const objectPath = path.startsWith('avatars/') ? path.slice('avatars/'.length) : path;
   const result = client?.storage?.from?.('avatars')?.getPublicUrl?.(objectPath);
-  return result?.data?.publicUrl || path;
+  return result?.data?.publicUrl || resolvePublicStorageUrl('avatars', path);
 }
 
 function resolveProfileAvatar(client, profile = null) {

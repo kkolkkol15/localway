@@ -15,7 +15,7 @@ import { buildTourFormPayloadFromTour, fetchGuideTours, publishGuideTour, submit
 import { submitGuideApplication } from '../lib/guideApplications.js';
 import { buildHomepageTourSections, createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
-import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
+import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
 
 const today = new Date().toISOString().slice(0, 10);
 const messageCategories = [
@@ -361,7 +361,7 @@ export function TourDetailPage() {
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
         <section>
           <div className="flex items-start justify-between gap-3"><div><h1 className="text-4xl font-black">{tour.title}</h1><p className="mt-2 text-zinc-600">{tour.description}</p></div><button className="icon-btn bg-white" onClick={toggleSavedTour}><Heart className={saved ? 'fill-primary text-primary' : ''} /></button></div>
-          <div className="mt-6 flex items-center gap-4 rounded-card bg-white p-4 shadow-soft"><img className="h-16 w-16 rounded-full object-cover" src={tour.guide.avatar} alt="" /><div><b>{tour.guide.name}</b><p className="text-sm text-zinc-600">{tour.guide.years} years in {tour.guide.city} · {tour.guide.languages.join(', ')}</p></div></div>
+          <div className="mt-6 flex items-center gap-4 rounded-card bg-white p-4 shadow-soft"><ProfileAvatar src={tour.guide.avatar} className="h-16 w-16 text-primary" /><div><b>{tour.guide.name}</b><p className="text-sm text-zinc-600">{tour.guide.years} years in {tour.guide.city} · {tour.guide.languages.join(', ')}</p></div></div>
           <div className="mt-6 grid gap-3 sm:grid-cols-3">{Object.entries(tour.options).map(([key, value]) => <div className="rounded-card bg-white p-4 shadow-soft" key={key}><Check className={value ? 'text-primary' : 'text-zinc-300'} /><b>{optionLabels[key]}</b></div>)}</div>
           <Reviews tour={tour} />
         </section>
@@ -2265,9 +2265,14 @@ function buildTourDraftPayload(formElement, { agreements, contentHtml, draftId }
 }
 
 function ProfileAvatar({ src, className = 'h-12 w-12' }) {
+  const [failed, setFailed] = useState(false);
+  const imageSrc = resolveAvatarUrl(null, src);
+  useEffect(() => {
+    setFailed(false);
+  }, [imageSrc]);
   return (
     <span className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-orange-50 ${className}`}>
-      {src ? <img className="h-full w-full object-cover" src={src} alt="" /> : <Camera size={24} />}
+      {imageSrc && !failed ? <img className="h-full w-full object-cover" src={imageSrc} alt="" onError={() => setFailed(true)} /> : <Camera size={24} />}
     </span>
   );
 }

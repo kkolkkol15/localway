@@ -1,4 +1,11 @@
+import { useState } from 'react';
 import { X } from 'lucide-react';
+
+function ImageWithFallback({ src, fallback, ...props }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) return fallback;
+  return <img {...props} src={src} alt={props.alt ?? ''} onError={() => setFailed(true)} />;
+}
 
 export function Modal({ title, children, onClose }) {
   return (
@@ -22,20 +29,21 @@ export function TourCard({ tour, onClick, saved, onSave }) {
   return (
     <article className="group min-w-[280px] overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
       <button className="block w-full text-left" onClick={onClick}>
-        {imageSrc ? (
-          <img className="h-56 w-full object-cover" src={imageSrc} alt="" loading="lazy" />
-        ) : (
-          <div className="grid h-56 w-full place-items-center bg-zinc-100 text-sm font-bold text-zinc-400">No image</div>
-        )}
+        <ImageWithFallback
+          className="h-56 w-full object-cover"
+          src={imageSrc}
+          alt=""
+          loading="lazy"
+          fallback={<div className="grid h-56 w-full place-items-center bg-zinc-100 text-sm font-bold text-zinc-400">No image</div>}
+        />
         <div className="grid gap-2 p-4">
           <div className="flex items-center gap-2">
-            {avatarSrc ? (
-              <img className="h-8 w-8 rounded-full object-cover" src={avatarSrc} alt="" />
-            ) : (
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-white text-xs font-black text-zinc-500">
-                {(tour.guide?.name || 'L').slice(0, 1)}
-              </span>
-            )}
+            <ImageWithFallback
+              className="h-8 w-8 rounded-full object-cover"
+              src={avatarSrc}
+              alt=""
+              fallback={<span className="grid h-8 w-8 place-items-center rounded-full bg-white text-xs font-black text-zinc-500">{(tour.guide?.name || 'L').slice(0, 1)}</span>}
+            />
             <span className="text-sm font-bold">{tour.guide?.name || 'Local guide'}</span>
           </div>
           <h3 className="line-clamp-2 text-lg font-black">{tour.title}</h3>

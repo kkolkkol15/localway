@@ -9,6 +9,7 @@ import {
   mapAuthUser,
   mapGuideProfile,
   resolveAvatarUrl,
+  resolvePublicStorageUrl,
   signInWithEmail,
   signUpWithEmail
 } from '../lib/supabaseAuth.js';
@@ -106,6 +107,17 @@ test('resolveAvatarUrl converts avatar storage paths to public URLs', () => {
 
   assert.equal(resolveAvatarUrl(client, 'user-1/avatar.png'), 'https://assets.example.com/avatars/user-1/avatar.png');
   assert.deepEqual(calls, [['avatars', 'user-1/avatar.png']]);
+});
+
+test('resolveAvatarUrl converts storage paths without a Supabase client', () => {
+  assert.equal(
+    resolveAvatarUrl(null, 'avatars/user 1/avatar.png'),
+    'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user%201/avatar.png'
+  );
+  assert.equal(
+    resolvePublicStorageUrl('tour-images', 'tour 1/cover.png', { VITE_SUPABASE_URL: 'https://project.supabase.co', VITE_SUPABASE_PUBLISHABLE_KEY: 'key' }),
+    'https://project.supabase.co/storage/v1/object/public/tour-images/tour%201/cover.png'
+  );
 });
 
 test('signInWithEmail returns active guide profile for approved guides', async () => {
