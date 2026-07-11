@@ -19,11 +19,176 @@ function encodeStoragePath(path = '') {
     .join('/');
 }
 
+function compactText(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function htmlToText(value = '') {
+  return compactText(String(value || '').replace(/<[^>]*>/g, ' '));
+}
+
+function formatPrice(currency = 'USD', amount = 0) {
+  const value = Number(amount ?? 0);
+  return `${currency || 'USD'} ${Number.isFinite(value) ? value.toLocaleString('ko-KR') : '0'}`;
+}
+
+function formatDuration(minutes = 0) {
+  const value = Number(minutes ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return '시간 미정';
+  const hours = Math.floor(value / 60);
+  const rest = value % 60;
+  if (hours && rest) return `${hours}시간 ${rest}분`;
+  if (hours) return `${hours}시간`;
+  return `${rest}분`;
+}
+
+function formatReviewDate(value = '') {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('ko-KR');
+}
+
+function formatOptionLabel(key = '') {
+  return String(key)
+    .replace(/^option_/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeList(value) {
+  if (Array.isArray(value)) return value.map(compactText).filter(Boolean);
+  if (typeof value === 'string') return value.split(',').map(compactText).filter(Boolean);
+  if (value && typeof value === 'object') return Object.keys(value).filter((key) => value[key]).map(formatOptionLabel);
+  return [];
+}
+
 export function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseUrl = 'https://qrabzkcibqaslealvdar.supabase.co') {
   const path = String(storagePath || '').trim();
   if (!path || isRenderableImageUrl(path)) return path;
   const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
   return `${String(supabaseUrl).replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
+}
+
+export function buildTourItinerarySteps(tour = {}) {
+  const city = tour.city || 'the city';
+  const detailSentences = compactText(tour.detailText || tour.description)
+    .split(/(?<=[.!?。！？])\s+/)
+    .map(compactText)
+    .filter(Boolean);
+  const flow = detailSentences.slice(0, 2).join(' ') || 'Meet your guide and explore the local highlights selected for this tour.';
+  const transport = (tour.transportLabels ?? []).length ? ` Main transport: ${tour.transportLabels.join(', ')}.` : '';
+  const duration = tour.durationLabel && tour.durationLabel !== '시간 미정' ? ` Planned duration: ${tour.durationLabel}.` : '';
+  return [
+    {
+      title: `Meet in ${city}`,
+      description: `Start with your local guide in ${city} and confirm the route before the experience begins.`
+    },
+    {
+      title: 'Experience flow',
+      description: `${flow}${transport}`.trim()
+    },
+    {
+      title: 'Wrap up',
+      description: `Finish with final local tips and time for questions.${duration}`.trim()
+    }
+  ];
+}
+
+export function getPaginatedSearchResults(results = [], visibleCount = 12) {
+  const list = Array.isArray(results) ? results : [];
+  const count = Math.max(0, Number(visibleCount) || 0);
+  const visibleResults = list.slice(0, Math.min(count, list.length));
+  return {
+    visibleResults,
+    hasMore: visibleResults.length < list.length
+  };
+}
+
+export const DEFAULT_SEARCH_FILTERS = {
+  types: [],
+  paymentTypes: [],
+  languages: [],
+  options: [],
+  transport: [],
+  priceMin: '',
+  priceMax: '',
+  ratingMin: 0,
+  durationMin: '',
+  durationMax: '',
+  maxPeopleMin: '',
+  guideYearsMin: 0
+};
+
+function readNumberFilter(value) {
+  if (value === '' || value == null) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function uniqueSorted(values = []) {
+  return [...new Set(values.map(compactText).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+export function filterSearchTours(tours = [], { city = '', adults = 1, filters = DEFAULT_SEARCH_FILTERS } = {}) {
+  const normalizedCity = compactText(city).toLowerCase();
+  const requestedAdults = Math.max(1, Number(adults) || 1);
+  const priceMin = readNumberFilter(filters.priceMin);
+  const priceMax = readNumberFilter(filters.priceMax);
+  const ratingMin = readNumberFilter(filters.ratingMin) ?? 0;
+  const durationMin = readNumberFilter(filters.durationMin);
+  const durationMax = readNumberFilter(filters.durationMax);
+  const maxPeopleMin = Math.max(requestedAdults, readNumberFilter(filters.maxPeopleMin) ?? 0);
+  const guideYearsMin = readNumberFilter(filters.guideYearsMin) ?? 0;
+
+  return (Array.isArray(tours) ? tours : []).filter((tour) => {
+    if (normalizedCity && compactText(tour.city).toLowerCase() !== normalizedCity) return false;
+    if ((filters.types ?? []).length && !filters.types.includes(tour.type)) return false;
+    if ((filters.paymentTypes ?? []).length && !filters.paymentTypes.includes(tour.paymentType)) return false;
+    if ((filters.languages ?? []).length && !filters.languages.some((lang) => (tour.guide?.languages ?? []).includes(lang))) return false;
+    if ((filters.transport ?? []).length && !filters.transport.some((item) => (tour.transport ?? []).includes(item))) return false;
+    if ((filters.options ?? []).length && !filters.options.every((key) => Boolean(tour.options?.[key]))) return false;
+    if (priceMin != null && Number(tour.price ?? 0) < priceMin) return false;
+    if (priceMax != null && Number(tour.price ?? 0) > priceMax) return false;
+    if (Number(tour.rating ?? 0) < ratingMin) return false;
+    if (durationMin != null && Number(tour.durationMinutes ?? 0) < durationMin) return false;
+    if (durationMax != null && Number(tour.durationMinutes ?? 0) > durationMax) return false;
+    if (Number(tour.maxPeople ?? 0) < maxPeopleMin) return false;
+    if (Number(tour.guide?.years ?? 0) < guideYearsMin) return false;
+    return true;
+  });
+}
+
+export function sortSearchTours(tours = [], sort = 'recommended') {
+  const list = Array.isArray(tours) ? [...tours] : [];
+  if (sort === 'price_asc' || sort === 'price') return list.sort((a, b) => Number(a.price ?? 0) - Number(b.price ?? 0));
+  if (sort === 'price_desc') return list.sort((a, b) => Number(b.price ?? 0) - Number(a.price ?? 0));
+  if (sort === 'rating_desc' || sort === 'rated') return list.sort((a, b) => Number(b.rating ?? 0) - Number(a.rating ?? 0));
+  return list;
+}
+
+export function getSearchFilterOptions(tours = []) {
+  const list = Array.isArray(tours) ? tours : [];
+  const prices = list.map((tour) => Number(tour.price ?? 0)).filter(Number.isFinite);
+  return {
+    types: uniqueSorted(list.map((tour) => tour.type)),
+    paymentTypes: uniqueSorted(list.map((tour) => tour.paymentType)),
+    languages: uniqueSorted(list.flatMap((tour) => tour.guide?.languages ?? [])),
+    options: uniqueSorted(list.flatMap((tour) => Object.entries(tour.options ?? {}).filter(([, value]) => Boolean(value)).map(([key]) => key))),
+    transport: uniqueSorted(list.flatMap((tour) => tour.transport ?? [])),
+    priceRange: {
+      min: prices.length ? Math.min(...prices) : 0,
+      max: prices.length ? Math.max(...prices) : 0
+    }
+  };
+}
+
+export function buildTourDetailPath(tourOrId) {
+  const id = typeof tourOrId === 'string' ? tourOrId : tourOrId?.id;
+  const value = String(id || '').trim();
+  return value ? `/tour/${encodeURIComponent(value)}` : '';
 }
 
 export const homepageTourSectionDefinitions = [
@@ -42,9 +207,23 @@ export function mapGuideRecord(profile = {}) {
     city: profile.city || '',
     languages: profile.languages ?? [],
     years: profile.residence_years ?? 0,
+    intro: profile.intro || '',
     rating: Number(profile.rating_avg ?? 0),
     reviews: Number(profile.review_count ?? 0),
     avatar: resolvePublicStorageImageUrl('avatars', profileAvatarPath) || fallbackImage
+  };
+}
+
+function mapReviewRecord(review = {}) {
+  const profile = review.profiles ?? {};
+  return {
+    id: review.id,
+    author: compactText(profile.display_name) || 'Local Way traveler',
+    authorAvatar: resolvePublicStorageImageUrl('avatars', profile.avatar_path || ''),
+    rating: Math.min(5, Math.max(1, Number(review.rating ?? 0) || 1)),
+    createdAt: review.created_at || '',
+    dateLabel: formatReviewDate(review.created_at),
+    content: compactText(review.content)
   };
 }
 
@@ -52,28 +231,46 @@ export function mapTourRecord(record = {}) {
   const images = [...(record.tour_images ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   const guide = mapGuideRecord(record.guide_profiles ?? record.guide ?? {});
   const imagePaths = images.map((image) => resolvePublicStorageImageUrl('tour-images', image.image_path));
+  const durationMinutes = Number(record.duration_minutes ?? 0);
+  const maxPeople = Number(record.max_people ?? 1);
+  const optionLabels = normalizeList(record.options);
+  const transportLabels = normalizeList(record.transport);
+  const detailText = htmlToText(record.content_html) || compactText(record.description) || '';
+  const price = Number(record.price_amount ?? 0);
+  const reviewsList = (record.reviews ?? [])
+    .filter((review) => !review.status || review.status === 'visible')
+    .map(mapReviewRecord)
+    .filter((review) => review.content);
+  const reviewTotal = reviewsList.reduce((total, review) => total + review.rating, 0);
+  const reviewAverage = reviewsList.length ? Number((reviewTotal / reviewsList.length).toFixed(1)) : 0;
   return {
     id: record.id,
     title: record.title,
     city: record.city,
     type: record.type,
-    description: record.description,
+    description: compactText(record.description),
     contentHtml: record.content_html || '',
-    price: Number(record.price_amount ?? 0),
+    detailText,
+    price,
+    priceLabel: formatPrice(record.currency, price),
     currency: record.currency || 'USD',
     paymentType: record.payment_type || 'pay_as_you_go',
-    durationMinutes: Number(record.duration_minutes ?? 0),
-    maxPeople: Number(record.max_people ?? 1),
+    durationMinutes,
+    durationLabel: formatDuration(durationMinutes),
+    maxPeople,
+    maxPeopleLabel: `최대 ${Number.isFinite(maxPeople) && maxPeople > 0 ? maxPeople : 1}명`,
     status: record.status,
     image: imagePaths[0] || guide.avatar || '',
     thumbnail: imagePaths[0] || guide.avatar || '',
     gallery: imagePaths,
     options: record.options ?? {},
+    optionLabels,
     transport: record.transport ?? [],
+    transportLabels,
     guide,
-    rating: guide.rating,
-    reviews: guide.reviews,
-    reviewsList: record.reviews ?? []
+    rating: reviewAverage,
+    reviews: reviewsList.length,
+    reviewsList
   };
 }
 
@@ -216,7 +413,7 @@ export function mapConversationRecord(record = {}, currentUserId = '') {
 export async function fetchActiveTours(client, { city = '', filters = {} } = {}) {
   let query = client
     .from('tours')
-    .select('*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*)')
+    .select('*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))')
     .eq('status', 'active')
     .eq('guide_profiles.status', 'active');
   if (city) query = query.ilike('city', city);
@@ -229,8 +426,9 @@ export async function fetchActiveTours(client, { city = '', filters = {} } = {})
 export async function fetchTourById(client, tourId) {
   const { data, error } = await client
     .from('tours')
-    .select('*, guide_profiles(*, profiles(avatar_path)), tour_images(*), reviews(*)')
+    .select('*, guide_profiles(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))')
     .eq('id', requireValue(tourId, 'A tour id is required.'))
+    .eq('status', 'active')
     .single();
   throwIfError(error);
   return mapTourRecord(data);
@@ -309,6 +507,15 @@ export async function fetchBookmarks(client, profileId) {
     .eq('profile_id', requireValue(profileId, 'A profile id is required.'));
   throwIfError(error);
   return (data ?? []).map((item) => ({ tourId: item.tour_id, tour: item.tours ? mapTourRecord(item.tours) : null }));
+}
+
+export async function fetchBookmarkIds(client, profileId) {
+  const { data, error } = await client
+    .from('bookmarks')
+    .select('tour_id')
+    .eq('profile_id', requireValue(profileId, 'A profile id is required.'));
+  throwIfError(error);
+  return (data ?? []).map((item) => String(item.tour_id || '').trim()).filter(Boolean);
 }
 
 export async function toggleBookmark(client, { profileId, tourId, currentlySaved }) {

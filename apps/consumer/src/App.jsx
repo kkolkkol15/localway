@@ -1,9 +1,12 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAppState } from './state/AppContext.jsx';
 import { MessageBadgeProvider } from './state/MessageBadgeContext.jsx';
 import { Header } from './components/Header.jsx';
 import { Footer } from './components/Footer.jsx';
 import { Toast } from './components/Toast.jsx';
+import { fetchBookmarkIds } from './lib/customerApi.js';
+import { createBrowserSupabaseClient, getSupabaseConfig } from './lib/supabaseAuth.js';
 import {
   HomePage, SearchPage, TourDetailPage, PaymentPage, BookingSuccessPage, LoginPage,
   GuideRegistrationPage, MyPage, GuideModePage, GuideMyToursPage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
@@ -25,7 +28,26 @@ function ProtectedRoute({ children, guideOnly = false }) {
 
 export default function App() {
   const location = useLocation();
+  const { state, dispatch } = useAppState();
   const isMessagesPage = location.pathname === '/messages';
+
+  useEffect(() => {
+    let active = true;
+    async function syncBookmarks() {
+      if (!state.auth.user?.id || !getSupabaseConfig().isConfigured) return;
+      try {
+        const client = await createBrowserSupabaseClient();
+        const tourIds = await fetchBookmarkIds(client, state.auth.user.id);
+        if (active) dispatch({ type: 'SET_BOOKMARKS', payload: { tourIds } });
+      } catch {
+        if (active) dispatch({ type: 'SET_BOOKMARKS', payload: { tourIds: [] } });
+      }
+    }
+    syncBookmarks();
+    return () => {
+      active = false;
+    };
+  }, [dispatch, state.auth.user?.id]);
 
   return (
     <div className="flex min-h-screen flex-col bg-cream text-zinc-900">

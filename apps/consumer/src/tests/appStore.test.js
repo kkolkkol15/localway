@@ -154,6 +154,23 @@ test('bookmark toggle adds and removes a tour id', () => {
   assert.deepEqual(state.bookmarks, []);
 });
 
+test('set bookmarks replaces local bookmarks with database ids', () => {
+  let state = createInitialState();
+  state = appReducer(state, { type: 'TOGGLE_BOOKMARK', payload: { tourId: 'local-only' } });
+  state = appReducer(state, { type: 'SET_BOOKMARKS', payload: { tourIds: ['tour-2', 'tour-1', 'tour-2', ''] } });
+
+  assert.deepEqual(state.bookmarks, ['tour-2', 'tour-1']);
+});
+
+test('logout clears saved bookmark state from the browser session', () => {
+  let state = createInitialState();
+  state = appReducer(state, signedInAction);
+  state = appReducer(state, { type: 'SET_BOOKMARKS', payload: { tourIds: ['tour-1'] } });
+  state = appReducer(state, { type: 'LOGOUT' });
+
+  assert.deepEqual(state.bookmarks, []);
+});
+
 test('mock payment creates booking and opens guide conversation', () => {
   let state = createInitialState();
   state = appReducer(state, signedInAction);

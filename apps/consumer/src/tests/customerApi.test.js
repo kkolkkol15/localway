@@ -8,15 +8,141 @@ import {
   buildMemberProfilePatch,
   buildSupportTicketRow,
   buildHomepageTourSections,
+  buildTourDetailPath,
+  buildTourItinerarySteps,
+  DEFAULT_SEARCH_FILTERS,
   fetchActiveTours,
+  fetchBookmarkIds,
+  fetchTourById,
+  filterSearchTours,
+  getSearchFilterOptions,
+  getPaginatedSearchResults,
   mapConversationRecord,
   resolvePublicStorageImageUrl,
   mapTourRecord,
+  sortSearchTours,
   updateGuideProfile,
   updateMemberProfile,
   upsertAccountSettings,
   toggleBookmark
 } from '../lib/customerApi.js';
+
+const searchToursFixture = [
+  {
+    id: 'tour-a',
+    title: 'Budget food walk',
+    city: 'Seoul',
+    type: 'Food Tour',
+    price: 20,
+    paymentType: 'pay_as_you_go',
+    durationMinutes: 90,
+    maxPeople: 2,
+    rating: 4.8,
+    options: { pickup: true, petFriendly: false },
+    transport: ['Walk'],
+    guide: { years: 5, languages: ['Korean', 'English'] }
+  },
+  {
+    id: 'tour-b',
+    title: 'Private night route',
+    city: 'Seoul',
+    type: 'Outdoor',
+    price: 80,
+    paymentType: 'package',
+    durationMinutes: 180,
+    maxPeople: 6,
+    rating: 4.2,
+    options: { pickup: false, petFriendly: true },
+    transport: ['Car'],
+    guide: { years: 12, languages: ['English', 'Japanese'] }
+  },
+  {
+    id: 'tour-c',
+    title: 'Busan market',
+    city: 'Busan',
+    type: 'Food Tour',
+    price: 45,
+    paymentType: 'package',
+    durationMinutes: 120,
+    maxPeople: 4,
+    rating: 5,
+    options: { pickup: true, petFriendly: true },
+    transport: ['Walk', 'Public transport'],
+    guide: { years: 8, languages: ['Korean'] }
+  }
+];
+
+test('sortSearchTours sorts by low price, high price, and high rating', () => {
+  assert.deepEqual(sortSearchTours(searchToursFixture, 'price_asc').map((tour) => tour.id), ['tour-a', 'tour-c', 'tour-b']);
+  assert.deepEqual(sortSearchTours(searchToursFixture, 'price_desc').map((tour) => tour.id), ['tour-b', 'tour-c', 'tour-a']);
+  assert.deepEqual(sortSearchTours(searchToursFixture, 'rating_desc').map((tour) => tour.id), ['tour-c', 'tour-a', 'tour-b']);
+});
+
+test('filterSearchTours applies city, adults, price, rating, payment, type, language, option, transport, duration, and guide years', () => {
+  const filters = {
+    ...DEFAULT_SEARCH_FILTERS,
+    priceMin: 10,
+    priceMax: 50,
+    ratingMin: 4.5,
+    paymentTypes: ['pay_as_you_go'],
+    types: ['Food Tour'],
+    languages: ['English'],
+    options: ['pickup'],
+    transport: ['Walk'],
+    durationMax: 120,
+    guideYearsMin: 3
+  };
+
+  const results = filterSearchTours(searchToursFixture, { city: 'Seoul', adults: 2, filters });
+
+  assert.deepEqual(results.map((tour) => tour.id), ['tour-a']);
+});
+
+test('filterSearchTours excludes tours below requested traveler count', () => {
+  const results = filterSearchTours(searchToursFixture, { adults: 5, filters: DEFAULT_SEARCH_FILTERS });
+
+  assert.deepEqual(results.map((tour) => tour.id), ['tour-b']);
+});
+
+test('getSearchFilterOptions derives distinct options from real tour data', () => {
+  const options = getSearchFilterOptions(searchToursFixture);
+
+  assert.deepEqual(options.types, ['Food Tour', 'Outdoor']);
+  assert.deepEqual(options.paymentTypes, ['package', 'pay_as_you_go']);
+  assert.deepEqual(options.languages, ['English', 'Japanese', 'Korean']);
+  assert.deepEqual(options.options, ['petFriendly', 'pickup']);
+  assert.deepEqual(options.transport, ['Car', 'Public transport', 'Walk']);
+  assert.deepEqual(options.priceRange, { min: 20, max: 80 });
+});
+
+test('getPaginatedSearchResults exposes the first page and detects more results', () => {
+  const results = Array.from({ length: 13 }, (_, index) => ({ id: `tour-${index + 1}` }));
+
+  const page = getPaginatedSearchResults(results, 12);
+
+  assert.equal(page.visibleResults.length, 12);
+  assert.equal(page.visibleResults.at(0).id, 'tour-1');
+  assert.equal(page.visibleResults.at(-1).id, 'tour-12');
+  assert.equal(page.hasMore, true);
+});
+
+test('getPaginatedSearchResults grows by the requested visible count and clamps at total', () => {
+  const results = Array.from({ length: 18 }, (_, index) => ({ id: `tour-${index + 1}` }));
+
+  const page = getPaginatedSearchResults(results, 24);
+
+  assert.equal(page.visibleResults.length, 18);
+  assert.equal(page.hasMore, false);
+});
+
+test('getPaginatedSearchResults hides more state when results fit the first page', () => {
+  const results = Array.from({ length: 12 }, (_, index) => ({ id: `tour-${index + 1}` }));
+
+  const page = getPaginatedSearchResults(results, 12);
+
+  assert.equal(page.visibleResults.length, 12);
+  assert.equal(page.hasMore, false);
+});
 
 test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
   const tour = mapTourRecord({
@@ -57,6 +183,154 @@ test('mapTourRecord normalizes Supabase tour rows for customer cards', () => {
     'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/two.png'
   ]);
   assert.deepEqual(tour.options, { pickup: true });
+});
+
+test('mapTourRecord prepares real tour detail fields for the detail page', () => {
+  const tour = mapTourRecord({
+    id: 'tour-detail-1',
+    title: 'Hidden Seoul food walk',
+    city: 'Seoul',
+    type: 'Food',
+    description: 'Eat through local markets.',
+    content_html: '<p>Start at Mangwon Market.</p><p>Finish with tea.</p>',
+    price_amount: 60000,
+    currency: 'KRW',
+    duration_minutes: 150,
+    max_people: 6,
+    options: { pickup: true, localMeal: true, interpretation: false },
+    transport: ['Walking', 'Subway'],
+    guide_profiles: {
+      id: 'guide-1',
+      display_name: 'Mina',
+      city: 'Seoul',
+      languages: ['Korean', 'English'],
+      intro: 'I host small food walks.',
+      residence_years: 7,
+      profiles: { avatar_path: 'user-1/avatar.png' }
+    },
+    tour_images: []
+  });
+
+  assert.equal(tour.priceLabel, 'KRW 60,000');
+  assert.equal(tour.durationLabel, '2시간 30분');
+  assert.equal(tour.maxPeopleLabel, '최대 6명');
+  assert.equal(tour.detailText, 'Start at Mangwon Market. Finish with tea.');
+  assert.deepEqual(tour.optionLabels, ['Pickup', 'Local Meal']);
+  assert.deepEqual(tour.transportLabels, ['Walking', 'Subway']);
+  assert.equal(tour.guide.intro, 'I host small food walks.');
+});
+
+test('mapTourRecord computes tour ratings from visible review rows', () => {
+  const tour = mapTourRecord({
+    id: 'tour-review-1',
+    title: 'Review tour',
+    city: 'Seoul',
+    guide_profiles: {
+      display_name: 'Guide',
+      rating_avg: 5,
+      review_count: 99
+    },
+    reviews: [
+      {
+        id: 'review-1',
+        rating: 5,
+        content: 'Great local route.',
+        status: 'visible',
+        created_at: '2026-07-10T10:00:00Z',
+        profiles: { display_name: 'Taehyo Kim', avatar_path: 'user-1/avatar.png' }
+      },
+      {
+        id: 'review-2',
+        rating: 3,
+        content: 'Good guide.',
+        status: 'visible',
+        created_at: '2026-07-09T10:00:00Z',
+        profiles: { display_name: 'Mina Park' }
+      },
+      {
+        id: 'review-hidden',
+        rating: 1,
+        content: 'Hidden',
+        status: 'hidden',
+        created_at: '2026-07-08T10:00:00Z'
+      }
+    ]
+  });
+
+  assert.equal(tour.rating, 4);
+  assert.equal(tour.reviews, 2);
+  assert.deepEqual(tour.reviewsList.map((review) => review.id), ['review-1', 'review-2']);
+  assert.deepEqual(tour.reviewsList[0], {
+    id: 'review-1',
+    author: 'Taehyo Kim',
+    authorAvatar: 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user-1/avatar.png',
+    rating: 5,
+    createdAt: '2026-07-10T10:00:00Z',
+    dateLabel: '2026. 7. 10.',
+    content: 'Great local route.'
+  });
+});
+
+test('mapTourRecord falls back cleanly when a tour has no reviews', () => {
+  const tour = mapTourRecord({
+    id: 'tour-empty-reviews',
+    title: 'No reviews',
+    city: 'Busan',
+    guide_profiles: {
+      display_name: 'Guide',
+      rating_avg: 4.9,
+      review_count: 12
+    },
+    reviews: []
+  });
+
+  assert.equal(tour.rating, 0);
+  assert.equal(tour.reviews, 0);
+  assert.deepEqual(tour.reviewsList, []);
+});
+
+test('buildTourItinerarySteps creates course steps from existing tour data', () => {
+  const steps = buildTourItinerarySteps({
+    city: 'Seoul',
+    durationLabel: '2시간',
+    transportLabels: ['Walking'],
+    detailText: 'Meet at the station. Explore the market. Finish at a tea house.'
+  });
+
+  assert.deepEqual(steps.map((step) => step.title), ['Meet in Seoul', 'Experience flow', 'Wrap up']);
+  assert.match(steps[1].description, /Explore the market/);
+  assert.match(steps[2].description, /2시간/);
+});
+
+test('fetchTourById requests active tour detail data without mock fallback', async () => {
+  const calls = [];
+  const query = {
+    select: (columns) => {
+      calls.push(['select', columns]);
+      return query;
+    },
+    eq: (column, value) => {
+      calls.push(['eq', column, value]);
+      return query;
+    },
+    single: async () => ({ data: { id: 'tour-1', title: 'Tour', guide_profiles: {}, tour_images: [] }, error: null })
+  };
+  const fakeClient = {
+    from: (table) => {
+      calls.push(['from', table]);
+      return query;
+    }
+  };
+
+  const tour = await fetchTourById(fakeClient, 'tour-1');
+
+  assert.equal(tour.id, 'tour-1');
+  assert.deepEqual(calls, [
+    ['from', 'tours'],
+    ['select', '*, guide_profiles(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))'],
+    ['eq', 'id', 'tour-1'],
+    ['eq', 'status', 'active']
+  ]);
 });
 
 test('resolvePublicStorageImageUrl preserves URLs and converts storage paths', () => {
@@ -113,6 +387,14 @@ test('buildHomepageTourSections keeps every section empty when there are no appr
   assert.deepEqual(sections, { popular: [], recommended: [] });
 });
 
+test('buildTourDetailPath links only real tours with stable ids', () => {
+  assert.equal(buildTourDetailPath({ id: 'tour-1' }), '/tour/tour-1');
+  assert.equal(buildTourDetailPath('tour-2'), '/tour/tour-2');
+  assert.equal(buildTourDetailPath({ id: '' }), '');
+  assert.equal(buildTourDetailPath({ title: 'Missing id' }), '');
+  assert.equal(buildTourDetailPath(null), '');
+});
+
 test('fetchActiveTours selects active tours from active guide profiles only', async () => {
   const calls = [];
   const query = {
@@ -140,7 +422,7 @@ test('fetchActiveTours selects active tours from active guide profiles only', as
 
   assert.deepEqual(calls, [
     ['from', 'tours'],
-    ['select', '*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*)'],
+    ['select', '*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))'],
     ['eq', 'status', 'active'],
     ['eq', 'guide_profiles.status', 'active'],
     ['order', 'created_at', { ascending: false }]
@@ -218,6 +500,35 @@ test('buildBookmarkRow maps a saved tour to the join table', () => {
     profile_id: 'user-1',
     tour_id: 'tour-1'
   });
+});
+
+test('fetchBookmarkIds loads saved tour ids for the current profile', async () => {
+  const calls = [];
+  const query = {
+    select: (columns) => {
+      calls.push(['select', columns]);
+      return query;
+    },
+    eq: async (column, value) => {
+      calls.push(['eq', column, value]);
+      return { data: [{ tour_id: 'tour-2' }, { tour_id: 'tour-1' }, { tour_id: '' }], error: null };
+    }
+  };
+  const fakeClient = {
+    from: (table) => {
+      calls.push(['from', table]);
+      return query;
+    }
+  };
+
+  const ids = await fetchBookmarkIds(fakeClient, 'user-1');
+
+  assert.deepEqual(ids, ['tour-2', 'tour-1']);
+  assert.deepEqual(calls, [
+    ['from', 'bookmarks'],
+    ['select', 'tour_id'],
+    ['eq', 'profile_id', 'user-1']
+  ]);
 });
 
 test('buildSupportTicketRow validates required ticket input', () => {

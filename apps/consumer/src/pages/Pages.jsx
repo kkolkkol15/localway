@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
 import { cities, faqs, languages, tourTypes, tours, transports } from '../data/mockData.js';
 import { useAppState } from '../state/AppContext.jsx';
@@ -13,11 +13,23 @@ import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js'
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
 import { buildTourFormPayloadFromTour, fetchGuideTours, publishGuideTour, submitTourChangeRequest } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
-import { buildHomepageTourSections, createSupportTicket, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, sendConversationMessage, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
+import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, signInWithEmail, signUpWithEmail } from '../lib/supabaseAuth.js';
 
 const today = new Date().toISOString().slice(0, 10);
+const SEARCH_RESULTS_PAGE_SIZE = 12;
+const searchSortOptions = [
+  { value: 'recommended', label: '추천순' },
+  { value: 'price_asc', label: '가격 낮은순' },
+  { value: 'price_desc', label: '가격 높은순' },
+  { value: 'rating_desc', label: '별점 높은순' }
+];
+const paymentTypeLabels = {
+  pay_as_you_go: '시간제 결제',
+  package: '패키지 결제'
+};
+const ratingFilterOptions = [0, 3, 4, 4.5];
 const messageCategories = [
   { id: 'all', label: '전체' },
   { id: 'admin', label: '운영팀' },
@@ -25,6 +37,77 @@ const messageCategories = [
   { id: 'guiding', label: '가이딩' },
   { id: 'support', label: '지원' }
 ];
+
+function createDefaultSearchFilters() {
+  return {
+    ...DEFAULT_SEARCH_FILTERS,
+    types: [],
+    paymentTypes: [],
+    languages: [],
+    options: [],
+    transport: []
+  };
+}
+
+function countActiveSearchFilters(filters = createDefaultSearchFilters()) {
+  return [
+    filters.types?.length,
+    filters.paymentTypes?.length,
+    filters.languages?.length,
+    filters.options?.length,
+    filters.transport?.length,
+    filters.priceMin !== '',
+    filters.priceMax !== '',
+    Number(filters.ratingMin || 0) > 0,
+    filters.durationMin !== '',
+    filters.durationMax !== '',
+    filters.maxPeopleMin !== '',
+    Number(filters.guideYearsMin || 0) > 0
+  ].reduce((total, value) => total + (value ? 1 : 0), 0);
+}
+
+function labelSearchOption(key = '') {
+  const option = tourOptionGroups.find((item) => item.id === key);
+  if (option) return option.label;
+  return String(key)
+    .replace(/^option_/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function useBookmarkActions() {
+  const { state, dispatch } = useAppState();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  async function toggleTourBookmark(tour) {
+    const tourId = tour?.id;
+    if (!tourId) return;
+    if (!state.auth.isAuthenticated) {
+      navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+      return;
+    }
+
+    const previousBookmarks = state.bookmarks;
+    const currentlySaved = previousBookmarks.includes(tourId);
+    dispatch({ type: 'TOGGLE_BOOKMARK', payload: { tourId } });
+
+    try {
+      const client = await createBrowserSupabaseClient();
+      await toggleBookmark(client, { profileId: state.auth.user?.id, tourId, currentlySaved });
+    } catch {
+      dispatch({ type: 'SET_BOOKMARKS', payload: { tourIds: previousBookmarks } });
+    }
+  }
+
+  return {
+    bookmarkedTourIds: state.bookmarks,
+    toggleTourBookmark
+  };
+}
+
 const guideLanguageOptions = [
   '아프리칸스어', '알바니아어', '암하라어', '아랍어', '아르메니아어', '아제르바이잔어', '바스크어', '벨라루스어', '벵골어', '보스니아어',
   '불가리아어', '카탈로니아어', '세부아노어', '중국어(간체)', '중국어(번체)', '코르시카어', '크로아티아어', '체코어', '덴마크어', '네덜란드어',
@@ -67,6 +150,7 @@ const nationalityOptions = [
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { bookmarkedTourIds, toggleTourBookmark } = useBookmarkActions();
   const [homepageTourSections, setHomepageTourSections] = useState(() => buildHomepageTourSections([]));
   const [tourLoadError, setTourLoadError] = useState('');
   const [city, setCity] = useState('');
@@ -171,7 +255,12 @@ export function HomePage() {
             duration={section.duration}
             className={index > 0 ? 'mt-12' : ''}
             error={tourLoadError}
-            onTourClick={(tourId) => navigate(`/tour/${tourId}`)}
+            bookmarkedTourIds={bookmarkedTourIds}
+            onTourClick={(tour) => {
+              const path = buildTourDetailPath(tour);
+              if (path) navigate(path);
+            }}
+            onSaveTour={toggleTourBookmark}
           />
         ))}
       </div>
@@ -179,7 +268,7 @@ export function HomePage() {
   );
 }
 
-function TourCarouselSection({ title, tours: sectionTours, duration, className = '', error = '', onTourClick }) {
+function TourCarouselSection({ title, tours: sectionTours, duration, className = '', error = '', bookmarkedTourIds = [], onTourClick, onSaveTour }) {
   return (
     <section className={className}>
       <h2 className="mb-5 text-3xl font-black">{title}</h2>
@@ -192,7 +281,12 @@ function TourCarouselSection({ title, tours: sectionTours, duration, className =
           <div className="popular-carousel-track">
             {[...sectionTours, ...sectionTours].map((tour, index) => (
               <div className="popular-tour-slide" key={`${title}-${tour.id}-${index}`} aria-hidden={index >= sectionTours.length}>
-                <TourCard tour={tour} onClick={() => onTourClick(tour.id)} />
+                <TourCard
+                  tour={tour}
+                  saved={bookmarkedTourIds.includes(tour.id)}
+                  onClick={() => onTourClick(tour)}
+                  onSave={() => onSaveTour(tour)}
+                />
               </div>
             ))}
           </div>
@@ -235,11 +329,13 @@ function GuestRow({ title, subtitle, value, setValue, min = 0, last = false }) {
 
 export function SearchPage() {
   const navigate = useNavigate();
+  const { bookmarkedTourIds, toggleTourBookmark } = useBookmarkActions();
   const [params] = useSearchParams();
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState('recommended');
-  const [searchTours, setSearchTours] = useState(tours);
-  const [filters, setFilters] = useState({ types: [], languages: [], priceMin: 0, priceMax: 500, years: 3, toggles: {}, transport: [] });
+  const [searchTours, setSearchTours] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(SEARCH_RESULTS_PAGE_SIZE);
+  const [filters, setFilters] = useState(() => createDefaultSearchFilters());
   const city = params.get('city') || '';
   const adults = params.get('adults') || '1';
 
@@ -251,7 +347,7 @@ export function SearchPage() {
         const items = await fetchActiveTours(client, { city });
         if (active) setSearchTours(items.length ? items : []);
       } catch {
-        if (active) setSearchTours(tours);
+        if (active) setSearchTours([]);
       }
     }
     loadTours();
@@ -260,117 +356,316 @@ export function SearchPage() {
     };
   }, [city]);
 
-  const results = useMemo(() => {
-    let list = city ? searchTours.filter((tour) => tour.city.toLowerCase() === city.toLowerCase()) : searchTours;
-    if (filters.types.length) list = list.filter((tour) => filters.types.includes(tour.type));
-    list = list.filter((tour) => tour.price >= filters.priceMin && tour.price <= filters.priceMax && tour.guide.years >= filters.years);
-    if (filters.languages.length) list = list.filter((tour) => filters.languages.some((lang) => tour.guide.languages.includes(lang)));
-    Object.entries(filters.toggles).forEach(([key, on]) => { if (on) list = list.filter((tour) => tour.options?.[key]); });
-    if (filters.transport.length) list = list.filter((tour) => filters.transport.some((item) => (tour.transport ?? []).includes(item)));
-    if (sort === 'rated') list = [...list].sort((a, b) => b.rating - a.rating);
-    if (sort === 'price') list = [...list].sort((a, b) => a.price - b.price);
-    return list;
-  }, [city, filters, searchTours, sort]);
+  const cityScopedTours = useMemo(() => filterSearchTours(searchTours, { city, adults, filters: createDefaultSearchFilters() }), [adults, city, searchTours]);
+  const filterOptions = useMemo(() => getSearchFilterOptions(cityScopedTours), [cityScopedTours]);
+  const activeFilterCount = countActiveSearchFilters(filters);
+  const results = useMemo(() => sortSearchTours(filterSearchTours(searchTours, { city, adults, filters }), sort), [adults, city, filters, searchTours, sort]);
+
+  useEffect(() => {
+    setVisibleCount(SEARCH_RESULTS_PAGE_SIZE);
+  }, [adults, city, filters, searchTours, sort]);
+
+  const { visibleResults, hasMore } = getPaginatedSearchResults(results, visibleCount);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-black">{city || 'All cities'} · {adults} adults</h1>
         <div className="flex gap-2">
-          <select className="h-11 rounded-full border px-4" value={sort} onChange={(event) => setSort(event.target.value)}><option value="recommended">Recommended</option><option value="rated">Highest Rated</option><option value="price">Lowest Price</option></select>
-          <button className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full bg-primary px-5 font-black text-white" onClick={() => setOpen(true)}><SlidersHorizontal size={18} /> Filter</button>
+          <select className="h-11 rounded-full border px-4" value={sort} onChange={(event) => setSort(event.target.value)}>{searchSortOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+          <button className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full bg-primary px-5 font-black text-white" onClick={() => setOpen(true)}><SlidersHorizontal size={18} /> 필터{activeFilterCount ? ` ${activeFilterCount}` : ''}</button>
         </div>
       </div>
-      {!results.length ? <section className="rounded-card bg-white p-10 text-center shadow-soft"><h2 className="text-2xl font-black">We are recruiting guides in {city || 'this city'}</h2><p className="mt-2 text-zinc-600">Know this city like home? Local Way would love to meet you.</p></section> : <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{results.map((tour) => <TourCard key={tour.id} tour={tour} onClick={() => navigate(`/tour/${tour.id}`)} />)}</div>}
-      {open && <FilterModal filters={filters} setFilters={setFilters} onClose={() => setOpen(false)} />}
+      {!results.length ? (
+        <section className="rounded-card bg-white p-10 text-center shadow-soft">
+          <h2 className="text-2xl font-black">해당 조건에 맞는 투어를 모집하고 있습니다.</h2>
+          <p className="mt-2 text-zinc-600">{city || '이 지역'}에서 조건에 맞는 로컬 투어가 등록되면 바로 보여드릴게요.</p>
+        </section>
+      ) : (
+        <>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleResults.map((tour) => <TourCard key={tour.id} tour={tour} saved={bookmarkedTourIds.includes(tour.id)} onSave={() => toggleTourBookmark(tour)} onClick={() => { const path = buildTourDetailPath(tour); if (path) navigate(path); }} />)}
+          </div>
+          {hasMore && (
+            <div className="mt-8 flex justify-center">
+              <button
+                type="button"
+                className="h-12 rounded-full border border-zinc-300 bg-white px-8 font-black text-zinc-900 shadow-soft transition hover:border-primary hover:text-primary"
+                onClick={() => setVisibleCount((count) => count + SEARCH_RESULTS_PAGE_SIZE)}
+              >
+                더보기
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {open && <FilterModal filters={filters} filterOptions={filterOptions} onApply={(nextFilters) => { setFilters(nextFilters); setOpen(false); }} onReset={() => setFilters(createDefaultSearchFilters())} onClose={() => setOpen(false)} />}
     </main>
   );
 }
 
-function FilterModal({ filters, setFilters, onClose }) {
-  const updateArray = (key, value) => setFilters((prev) => ({ ...prev, [key]: prev[key].includes(value) ? prev[key].filter((item) => item !== value) : [...prev[key], value] }));
+function FilterModal({ filters, filterOptions, onApply, onReset, onClose }) {
+  const [draft, setDraft] = useState(() => ({
+    ...createDefaultSearchFilters(),
+    ...filters,
+    types: [...(filters.types ?? [])],
+    paymentTypes: [...(filters.paymentTypes ?? [])],
+    languages: [...(filters.languages ?? [])],
+    options: [...(filters.options ?? [])],
+    transport: [...(filters.transport ?? [])]
+  }));
+  const updateArray = (key, value) => setDraft((prev) => ({ ...prev, [key]: prev[key].includes(value) ? prev[key].filter((item) => item !== value) : [...prev[key], value] }));
+  const updateField = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }));
+  const resetFilters = () => {
+    const nextFilters = createDefaultSearchFilters();
+    setDraft(nextFilters);
+    onReset();
+  };
+  const paymentItems = filterOptions.paymentTypes.length ? filterOptions.paymentTypes : ['pay_as_you_go', 'package'];
+  const typeItems = filterOptions.types.length ? filterOptions.types : tourTypes;
+  const languageItems = filterOptions.languages.length ? filterOptions.languages : languages;
+  const transportItems = filterOptions.transport.length ? filterOptions.transport : transports;
+  const optionItems = filterOptions.options.length ? filterOptions.options : tourOptionGroups.map((option) => option.id);
+  const maxPrice = filterOptions.priceRange.max || 500;
+
   return (
-    <Modal title="Filter" onClose={onClose}>
-      <div className="grid gap-5">
-        <CheckGroup title="Tour type" items={tourTypes} selected={filters.types} onToggle={(item) => updateArray('types', item)} />
-        <div><h3 className="font-black">Payment type</h3><div className="mt-2 grid gap-2"><label><input type="radio" name="pay" /> Pay as you go (hourly, min $5)</label><label><input type="radio" name="pay" /> Package Price (min $20)</label></div></div>
-        <div><h3 className="font-black">Price range</h3><div className="mt-2 grid grid-cols-2 gap-3"><input type="number" value={filters.priceMin} onChange={(e) => setFilters({ ...filters, priceMin: Number(e.target.value) })} /><input type="number" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: Number(e.target.value) })} /></div><input type="range" min="0" max="500" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: Number(e.target.value) })} /></div>
-        <div><h3 className="font-black">Guide residence duration: {filters.years}yr+</h3><input type="range" min="3" max="20" value={filters.years} onChange={(e) => setFilters({ ...filters, years: Number(e.target.value) })} /></div>
-        <CheckGroup title="Guide language" chip items={languages} selected={filters.languages} onToggle={(item) => updateArray('languages', item)} />
-        <CheckGroup title="Transport" items={transports} selected={filters.transport} onToggle={(item) => updateArray('transport', item)} />
-        <div><h3 className="font-black">Options</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(optionLabels).map(([key, label]) => <label className="flex items-center justify-between rounded-card bg-white p-3" key={key}>{label}<input type="checkbox" checked={!!filters.toggles[key]} onChange={(e) => setFilters({ ...filters, toggles: { ...filters.toggles, [key]: e.target.checked } })} /></label>)}</div></div>
-        <div className="flex gap-3"><button className="h-12 rounded-full border px-6 font-black" onClick={() => setFilters({ types: [], languages: [], priceMin: 0, priceMax: 500, years: 3, toggles: {}, transport: [] })}>Reset</button><button className="h-12 rounded-full bg-primary px-6 font-black text-white" onClick={onClose}>Apply</button></div>
+    <Modal title="필터" onClose={onClose}>
+      <div className="grid max-h-[72vh] gap-6 overflow-y-auto pr-1">
+        <section className="rounded-card border bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-black">가격대</h3>
+              <p className="text-sm text-zinc-500">저장된 투어 가격 기준입니다.</p>
+            </div>
+            <span className="text-sm font-bold text-zinc-500">{filterOptions.priceRange.min.toLocaleString()} - {maxPrice.toLocaleString()}</span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="text-sm font-bold text-zinc-600">최소 가격<input className="mt-1" type="number" min="0" value={draft.priceMin} placeholder="0" onChange={(event) => updateField('priceMin', event.target.value)} /></label>
+            <label className="text-sm font-bold text-zinc-600">최대 가격<input className="mt-1" type="number" min="0" value={draft.priceMax} placeholder={String(maxPrice)} onChange={(event) => updateField('priceMax', event.target.value)} /></label>
+          </div>
+        </section>
+
+        <section className="rounded-card border bg-white p-4">
+          <h3 className="font-black">최소 별점</h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {ratingFilterOptions.map((rating) => (
+              <button type="button" className={`min-h-11 rounded-full border px-4 font-bold ${Number(draft.ratingMin) === rating ? 'border-primary bg-orange-50 text-primary' : 'bg-white'}`} onClick={() => updateField('ratingMin', rating)} key={rating}>
+                {rating ? `${rating}점 이상` : '전체'}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <CheckGroup title="투어 유형" items={typeItems} selected={draft.types} onToggle={(item) => updateArray('types', item)} />
+        <CheckGroup title="결제 방식" items={paymentItems} selected={draft.paymentTypes} onToggle={(item) => updateArray('paymentTypes', item)} labelFor={(item) => paymentTypeLabels[item] || item} />
+
+        <section className="rounded-card border bg-white p-4">
+          <h3 className="font-black">소요 시간과 인원</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-sm font-bold text-zinc-600">최소 시간(분)<input className="mt-1" type="number" min="0" value={draft.durationMin} placeholder="예: 60" onChange={(event) => updateField('durationMin', event.target.value)} /></label>
+            <label className="text-sm font-bold text-zinc-600">최대 시간(분)<input className="mt-1" type="number" min="0" value={draft.durationMax} placeholder="예: 180" onChange={(event) => updateField('durationMax', event.target.value)} /></label>
+            <label className="text-sm font-bold text-zinc-600">최소 수용 인원<input className="mt-1" type="number" min="1" value={draft.maxPeopleMin} placeholder="인원" onChange={(event) => updateField('maxPeopleMin', event.target.value)} /></label>
+          </div>
+        </section>
+
+        <section className="rounded-card border bg-white p-4">
+          <h3 className="font-black">가이드 거주 기간</h3>
+          <div className="mt-3 flex items-center gap-3">
+            <input className="w-full accent-primary" type="range" min="0" max="20" value={draft.guideYearsMin || 0} onChange={(event) => updateField('guideYearsMin', Number(event.target.value))} />
+            <span className="w-20 text-right font-black">{draft.guideYearsMin || 0}년+</span>
+          </div>
+        </section>
+
+        <CheckGroup title="가이드 언어" chip items={languageItems} selected={draft.languages} onToggle={(item) => updateArray('languages', item)} />
+        <CheckGroup title="이동수단" items={transportItems} selected={draft.transport} onToggle={(item) => updateArray('transport', item)} />
+        <CheckGroup title="포함 옵션" items={optionItems} selected={draft.options} onToggle={(item) => updateArray('options', item)} labelFor={labelSearchOption} />
+
+        <div className="sticky bottom-0 flex gap-3 border-t bg-[#fffaf1] py-4">
+          <button type="button" className="h-12 rounded-full border px-6 font-black" onClick={resetFilters}>초기화</button>
+          <button type="button" className="h-12 flex-1 rounded-full bg-primary px-6 font-black text-white" onClick={() => onApply(draft)}>결과 보기</button>
+        </div>
       </div>
     </Modal>
   );
 }
 
-function CheckGroup({ title, items, selected, onToggle, chip }) {
-  return <div><h3 className="font-black">{title}</h3><div className={`mt-2 flex flex-wrap gap-2 ${chip ? '' : 'grid sm:grid-cols-2'}`}>{items.map((item) => <button className={`min-h-11 rounded-full border px-4 font-bold ${selected.includes(item) ? 'border-primary bg-orange-50 text-primary' : 'bg-white'}`} key={item} onClick={() => onToggle(item)}>{item}</button>)}</div></div>;
+function CheckGroup({ title, items, selected, onToggle, chip, labelFor = (item) => item }) {
+  return <section className="rounded-card border bg-white p-4"><h3 className="font-black">{title}</h3><div className={`mt-3 flex flex-wrap gap-2 ${chip ? '' : 'grid sm:grid-cols-2'}`}>{items.map((item) => <button type="button" className={`min-h-11 rounded-full border px-4 font-bold ${selected.includes(item) ? 'border-primary bg-orange-50 text-primary' : 'bg-white'}`} key={item} onClick={() => onToggle(item)}>{labelFor(item)}</button>)}</div></section>;
 }
 
 export function TourDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch } = useAppState();
+  const { state } = useAppState();
+  const { bookmarkedTourIds, toggleTourBookmark } = useBookmarkActions();
   const [remoteTour, setRemoteTour] = useState(null);
-  const tour = remoteTour ?? tours.find((item) => item.id === id) ?? tours[0];
-  const [date, setDate] = useState(today);
-  const [time, setTime] = useState('10:00');
-  const saved = state.bookmarks.includes(tour.id);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [applyNotice, setApplyNotice] = useState('');
+  const tour = remoteTour;
+  const saved = tour ? bookmarkedTourIds.includes(tour.id) : false;
 
   useEffect(() => {
     let active = true;
     async function loadTour() {
+      setLoading(true);
+      setLoadError('');
       try {
         const client = await createBrowserSupabaseClient();
         const item = await fetchTourById(client, id);
         if (active) setRemoteTour(item);
-      } catch {
-        if (active) setRemoteTour(null);
+      } catch (error) {
+        if (active) {
+          setRemoteTour(null);
+          setLoadError(error?.message || '투어를 불러오지 못했습니다.');
+        }
+      } finally {
+        if (active) setLoading(false);
       }
     }
-    if (id) loadTour();
+    if (id) {
+      loadTour();
+    } else {
+      setLoading(false);
+      setLoadError('투어 ID가 없습니다.');
+    }
     return () => {
       active = false;
     };
   }, [id]);
 
-  function reserve() {
-    if (!state.auth.isAuthenticated) navigate(`/login?redirect=${encodeURIComponent(`/tour/${tour.id}`)}`);
-    else navigate(`/payment?tourId=${tour.id}&date=${date}&time=${time}`);
+  const toggleSavedTour = () => toggleTourBookmark(tour);
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section className="tour-detail-loading">
+          <div />
+          <span />
+          <span />
+        </section>
+      </main>
+    );
   }
 
-  async function toggleSavedTour() {
-    if (!state.auth.isAuthenticated) {
-      navigate(`/login?redirect=/tour/${tour.id}`);
-      return;
-    }
-    try {
-      const client = await createBrowserSupabaseClient();
-      await toggleBookmark(client, { profileId: state.auth.user?.id, tourId: tour.id, currentlySaved: saved });
-    } catch {
-      // Keep the local bookmark behavior as a fallback if the backend call fails.
-    }
-    dispatch({ type: 'TOGGLE_BOOKMARK', payload: { tourId: tour.id } });
+  if (!tour) {
+    return (
+      <main className="mx-auto grid min-h-[62vh] max-w-3xl place-items-center px-4 py-12">
+        <section className="tour-detail-empty-state">
+          <h1>투어를 찾을 수 없습니다</h1>
+          <p>{loadError || '등록된 실제 투어 데이터가 없거나 공개 중인 투어가 아닙니다.'}</p>
+          <Link to="/search">다른 투어 보기</Link>
+        </section>
+      </main>
+    );
   }
+
+  const gallery = tour.gallery.length ? tour.gallery : [];
+  const heroImage = gallery[0] || tour.image || tour.thumbnail || '';
+  const sideImages = gallery.slice(1, 5);
+  const itinerary = buildTourItinerarySteps(tour);
+  const reviewLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `★ ${tour.rating} · 후기 ${tour.reviews}` : '신규 투어';
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-      <div className="grid gap-3 overflow-hidden rounded-card md:grid-cols-3">{tour.gallery.map((src) => <img className="h-72 w-full object-cover" src={src} alt="" loading="lazy" key={src} />)}</div>
-      <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
-        <section>
-          <div className="flex items-start justify-between gap-3"><div><h1 className="text-4xl font-black">{tour.title}</h1><p className="mt-2 text-zinc-600">{tour.description}</p></div><button className="icon-btn bg-white" onClick={toggleSavedTour}><Heart className={saved ? 'fill-primary text-primary' : ''} /></button></div>
-          <div className="mt-6 flex items-center gap-4 rounded-card bg-white p-4 shadow-soft"><ProfileAvatar src={tour.guide.avatar} className="h-16 w-16 text-primary" /><div><b>{tour.guide.name}</b><p className="text-sm text-zinc-600">{tour.guide.years} years in {tour.guide.city} · {tour.guide.languages.join(', ')}</p></div></div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">{Object.entries(tour.options).map(([key, value]) => <div className="rounded-card bg-white p-4 shadow-soft" key={key}><Check className={value ? 'text-primary' : 'text-zinc-300'} /><b>{optionLabels[key]}</b></div>)}</div>
+    <main className="tour-detail-page">
+      <header className="tour-detail-header">
+        <div>
+          <p>{tour.city} · {tour.type}</p>
+          <h1>{tour.title}</h1>
+          <div className="tour-detail-submeta">
+            <span>{reviewLabel}</span>
+            <span>{tour.durationLabel}</span>
+            <span>{tour.maxPeopleLabel}</span>
+          </div>
+        </div>
+        <button className="tour-detail-save" type="button" onClick={toggleSavedTour}>
+          <Heart className={saved ? 'fill-primary text-primary' : ''} size={19} />
+          {saved ? '저장됨' : '저장'}
+        </button>
+      </header>
+
+      <section className="tour-detail-gallery">
+        {heroImage ? <img className="tour-detail-gallery-main" src={heroImage} alt="" /> : <div className="tour-detail-gallery-empty">이미지 없음</div>}
+        <div className="tour-detail-gallery-side">
+          {sideImages.length ? sideImages.map((src) => <img src={src} alt="" key={src} />) : <div>추가 이미지 없음</div>}
+        </div>
+      </section>
+
+      <div className="tour-detail-layout">
+        <section className="tour-detail-content">
+          <article className="tour-detail-host-card">
+            <ProfileAvatar src={tour.guide.avatar} className="h-16 w-16 text-primary" />
+            <div>
+              <h2>{tour.guide.name} 가이드가 진행합니다</h2>
+              <p>{tour.guide.city || tour.city} · {(tour.guide.languages ?? []).join(', ') || '언어 정보 미입력'}</p>
+            </div>
+          </article>
+
+          <section className="tour-detail-section">
+            <h2>투어 소개</h2>
+            <p>{tour.detailText || tour.description || '투어 설명이 아직 등록되지 않았습니다.'}</p>
+          </section>
+
+          <section className="tour-detail-section">
+            <h2>진행 일정</h2>
+            <ol className="tour-detail-itinerary">
+              {itinerary.map((step, index) => (
+                <li key={step.title}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <h3>{step.title}</h3>
+                    <p>{step.description}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section className="tour-detail-facts">
+            <article><CalendarDays size={20} /><b>{tour.durationLabel}</b><span>예상 소요 시간</span></article>
+            <article><UserRound size={20} /><b>{tour.maxPeopleLabel}</b><span>참여 가능 인원</span></article>
+            <article><Globe2 size={20} /><b>{tour.city}</b><span>진행 도시</span></article>
+          </section>
+
+          <section className="tour-detail-section">
+            <h2>포함 정보</h2>
+            <div className="tour-detail-chip-row">
+              {(tour.optionLabels.length ? tour.optionLabels : ['옵션 정보 미입력']).map((item) => <span key={item}>{item}</span>)}
+            </div>
+          </section>
+
+          <section className="tour-detail-section">
+            <h2>이동수단</h2>
+            <div className="tour-detail-chip-row">
+              {(tour.transportLabels.length ? tour.transportLabels : ['이동수단 미입력']).map((item) => <span key={item}>{item}</span>)}
+            </div>
+          </section>
+
+          <section className="tour-detail-guide-panel">
+            <ProfileAvatar src={tour.guide.avatar} className="h-20 w-20 text-primary" />
+            <div>
+              <h2>{tour.guide.name}</h2>
+              <p>{tour.guide.intro || `${tour.city}에서 현지 경험을 안내하는 로컬 가이드입니다.`}</p>
+              <small>{tour.guide.years ? `${tour.guide.years}년 거주` : '거주 기간 미입력'} · {(tour.guide.languages ?? []).join(', ') || '언어 정보 미입력'}</small>
+            </div>
+          </section>
+
           <Reviews tour={tour} />
         </section>
-        <aside className="sticky top-24 h-fit rounded-card bg-white p-5 shadow-soft">
-          <p className="text-2xl font-black">${tour.price} <span className="text-sm text-zinc-500">/ person</span></p>
-          <label className="mt-4 block font-bold">Date<input className="mt-2" type="date" min={today} value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <div className="mt-4 grid grid-cols-2 gap-2">{['10:00', '14:00'].map((slot) => <button className={`h-11 rounded-full border font-bold ${time === slot ? 'border-primary bg-orange-50 text-primary' : ''}`} onClick={() => setTime(slot)} key={slot}>{slot}</button>)}</div>
-          <button className="mt-5 h-12 w-full rounded-full bg-primary font-black text-white" onClick={reserve}>Reserve</button>
-          <button className="mt-3 h-11 w-full rounded-full border font-bold" onClick={() => navigator.share?.({ title: tour.title, url: location.href })}><Share2 size={17} /> Share</button>
+
+        <aside className="tour-detail-apply-card">
+          <div>
+            <strong>{tour.priceLabel}</strong>
+            <span> / 1인</span>
+          </div>
+          <dl>
+            <div><dt>도시</dt><dd>{tour.city}</dd></div>
+            <div><dt>시간</dt><dd>{tour.durationLabel}</dd></div>
+            <div><dt>인원</dt><dd>{tour.maxPeopleLabel}</dd></div>
+          </dl>
+          <button type="button" onClick={() => setApplyNotice('투어신청 기능은 준비 중입니다.')}>투어신청</button>
+          {applyNotice && <p>{applyNotice}</p>}
+          <button className="tour-detail-share" type="button" onClick={() => navigator.share?.({ title: tour.title, url: location.href })}><Share2 size={17} /> 공유하기</button>
         </aside>
       </div>
     </main>
@@ -378,7 +673,46 @@ export function TourDetailPage() {
 }
 
 function Reviews({ tour }) {
-  return <section className="mt-8"><h2 className="text-2xl font-black">Reviews · ⭐ {tour.rating}</h2>{tour.reviewsList.length ? <div className="mt-4 grid gap-4 md:grid-cols-2">{tour.reviewsList.map((review) => <article className="rounded-card bg-white p-4 shadow-soft" key={review.id}><b>{review.author}</b><p>{'★'.repeat(review.rating)}</p><p>{review.text}</p></article>)}</div> : <p className="mt-3 rounded-card bg-white p-5 shadow-soft">No reviews yet</p>}<div className="mt-4 grid gap-2">{[5, 4, 3, 2, 1].map((star) => <div className="flex items-center gap-2" key={star}><span className="w-8">{star}★</span><div className="h-2 flex-1 rounded-full bg-zinc-200"><div className="h-2 rounded-full bg-primary" style={{ width: `${star * 16}%` }} /></div></div>)}</div></section>;
+  const reviews = tour.reviewsList ?? [];
+  return (
+    <section className="tour-detail-reviews">
+      <div className="tour-detail-review-summary">
+        <div>
+          <span>리뷰 및 평점</span>
+          <h2><Star size={30} fill="currentColor" /> {tour.rating ? tour.rating.toFixed(1) : '0.0'}</h2>
+        </div>
+        <p>전체 리뷰 {tour.reviews}개</p>
+      </div>
+
+      {reviews.length ? (
+        <div className="tour-detail-review-list">
+          {reviews.map((review) => (
+            <article className="tour-detail-review-card" key={review.id}>
+              <header>
+                <ProfileAvatar src={review.authorAvatar} className="h-11 w-11 text-primary" />
+                <div>
+                  <b>{review.author}</b>
+                  <span>{review.dateLabel || '작성일 미입력'}</span>
+                </div>
+              </header>
+              <div className="tour-detail-review-stars" aria-label={`${review.rating}점 리뷰`}>
+                {Array.from({ length: 5 }, (_, index) => (
+                  <Star key={index} size={16} fill={index < review.rating ? 'currentColor' : 'none'} />
+                ))}
+              </div>
+              <p>{review.content}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="tour-detail-review-empty">
+          <Star size={26} />
+          <b>첫 리뷰를 기다리고 있어요</b>
+          <p>이 투어를 경험한 여행자의 리뷰가 등록되면 여기에 표시됩니다.</p>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function PaymentPage() {
@@ -882,6 +1216,7 @@ export function MyPage() {
   const menu = [
     { label: 'My Bookings', path: '/mypage/bookings', description: 'Upcoming reservations and trip chats', Icon: CalendarDays, tone: 'orange' },
     { label: 'Past Trips', path: '/mypage/past-trips', description: 'Completed travel history in one place', Icon: Check, tone: 'green' },
+    { label: 'Bookmarks', path: '/bookmarks', description: 'Saved tours and wishlist', Icon: Heart, tone: 'rose' },
     { label: 'Review Management', path: '/mypage/reviews', description: 'Write, edit, and track your reviews', Icon: MessageCircle, tone: 'blue' },
     { label: 'Local Guide Mode', path: registeredGuide ? '/mypage/guide-mode' : '/register-guide', description: 'Manage guide profile, tours, and drafts', Icon: Star, tone: 'indigo' },
     !registeredGuide && { label: 'Become a Guide', path: '/register-guide', description: 'Apply to host local experiences', Icon: Heart, tone: 'rose' },
@@ -2279,8 +2614,9 @@ function ProfileAvatar({ src, className = 'h-12 w-12' }) {
 
 export function BookmarksPage() {
   const { state } = useAppState();
-  const [remoteBookmarks, setRemoteBookmarks] = useState([]);
-  const saved = remoteBookmarks.length ? remoteBookmarks : tours.filter((tour) => state.bookmarks.includes(tour.id));
+  const { bookmarkedTourIds, toggleTourBookmark } = useBookmarkActions();
+  const [remoteBookmarks, setRemoteBookmarks] = useState(null);
+  const saved = (remoteBookmarks ?? []).filter((tour) => bookmarkedTourIds.includes(tour.id));
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -2301,7 +2637,7 @@ export function BookmarksPage() {
     };
   }, [state.auth.user?.id]);
 
-  return <main className="mx-auto max-w-7xl px-4 py-8"><h1 className="text-3xl font-black">Bookmarks</h1>{saved.length ? <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{saved.map((tour) => <TourCard key={tour.id} tour={tour} onClick={() => navigate(`/tour/${tour.id}`)} />)}</div> : <p className="mt-5 rounded-card bg-white p-8 text-center shadow-soft">No saved tours yet. Save your favorites!</p>}</main>;
+  return <main className="mx-auto max-w-7xl px-4 py-8"><h1 className="text-3xl font-black">Bookmarks</h1>{saved.length ? <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{saved.map((tour) => <TourCard key={tour.id} tour={tour} saved={bookmarkedTourIds.includes(tour.id)} onSave={() => toggleTourBookmark(tour)} onClick={() => { const path = buildTourDetailPath(tour); if (path) navigate(path); }} />)}</div> : <p className="mt-5 rounded-card bg-white p-8 text-center shadow-soft">No saved tours yet. Save your favorites!</p>}</main>;
 }
 
 export function MessagesPage() {

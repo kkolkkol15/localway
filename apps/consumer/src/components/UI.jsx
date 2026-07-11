@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { Heart, X } from 'lucide-react';
 
 function ImageWithFallback({ src, fallback, ...props }) {
   const [failed, setFailed] = useState(false);
@@ -27,7 +27,21 @@ export function TourCard({ tour, onClick, saved, onSave }) {
   const ratingLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `⭐ ${tour.rating}` : '신규';
 
   return (
-    <article className="group min-w-[280px] overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
+    <article className="group relative min-w-[280px] overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
+      {onSave && (
+        <button
+          className="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-primary shadow-soft backdrop-blur transition hover:scale-105"
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onSave(event);
+          }}
+          aria-label={saved ? 'Remove from bookmarks' : 'Save to bookmarks'}
+        >
+          <Heart className={saved ? 'fill-primary text-primary' : 'text-zinc-700'} size={20} />
+        </button>
+      )}
       <button className="block w-full text-left" onClick={onClick}>
         <ImageWithFallback
           className="h-56 w-full object-cover"
@@ -51,7 +65,6 @@ export function TourCard({ tour, onClick, saved, onSave }) {
           <div className="flex items-center justify-between font-bold"><span>{ratingLabel}</span><span className="text-primary">${tour.price}</span></div>
         </div>
       </button>
-      {onSave && <button className="mx-4 mb-4 h-11 rounded-full border px-4 font-bold" onClick={onSave}>{saved ? '♥ Saved' : '♡ Save'}</button>}
     </article>
   );
 }

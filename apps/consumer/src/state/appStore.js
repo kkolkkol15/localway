@@ -121,7 +121,7 @@ export function appReducer(state, action) {
     case 'AUTH_ERROR':
       return { ...state, auth: { isAuthenticated: false, user: null, error: action.payload.message } };
     case 'LOGOUT':
-      return toast({ ...state, auth: { isAuthenticated: false, user: null, error: '' } }, 'Logged out');
+      return toast({ ...state, auth: { isAuthenticated: false, user: null, error: '' }, bookmarks: [] }, 'Logged out');
     case 'UPDATE_USER_PROFILE':
       return toast(
         {
@@ -199,6 +199,14 @@ export function appReducer(state, action) {
         { ...state, bookmarks: exists ? state.bookmarks.filter((id) => id !== action.payload.tourId) : [...state.bookmarks, action.payload.tourId] },
         exists ? 'Removed from saved tours' : 'Saved to bookmarks'
       );
+    }
+    case 'SET_BOOKMARKS': {
+      const tourIds = [];
+      (action.payload.tourIds ?? []).forEach((id) => {
+        const value = String(id || '').trim();
+        if (value && !tourIds.includes(value)) tourIds.push(value);
+      });
+      return { ...state, bookmarks: tourIds };
     }
     case 'PAY_NOW': {
       const tour = tours.find((item) => item.id === action.payload.tourId);
