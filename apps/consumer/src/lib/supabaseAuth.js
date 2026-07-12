@@ -184,6 +184,17 @@ async function getGuideProfile(client, userId) {
   return data;
 }
 
+async function getOwnedGuideProfile(client, userId) {
+  const { data, error } = await client
+    .from('guide_profiles')
+    .select('id, user_id, city, languages, intro, profile_image_path, status, nationality, gender, birth_year, residence_years, metadata')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function signUpWithEmail(client, { email, password, displayName, avatarFile = null }) {
   const normalizedEmail = email.trim().toLowerCase();
   const cleanName = displayName.trim();
@@ -255,4 +266,9 @@ export async function fetchCurrentAuthState(client) {
 export async function fetchActiveGuideProfile(client, userId) {
   if (!userId) return null;
   return mapGuideProfile(await getGuideProfile(client, userId));
+}
+
+export async function fetchOwnedGuideProfile(client, userId) {
+  if (!userId) return null;
+  return mapGuideProfile(await getOwnedGuideProfile(client, userId));
 }

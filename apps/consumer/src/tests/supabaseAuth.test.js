@@ -5,6 +5,7 @@ import {
   buildSupabaseAuthOptions,
   fetchActiveGuideProfile,
   fetchCurrentAuthState,
+  fetchOwnedGuideProfile,
   getAuthErrorMessage,
   getSupabaseConfig,
   mapAuthUser,
@@ -250,6 +251,32 @@ test('fetchActiveGuideProfile maps an active guide profile by user id', async ()
 
   assert.equal(guideProfile.id, 'guide-profile-1');
   assert.deepEqual(calls, [['user_id', 'user-1'], ['status', 'active']]);
+});
+
+test('fetchOwnedGuideProfile loads the current guide profile without active status filtering', async () => {
+  const calls = [];
+  const builder = {
+    eq: (...args) => {
+      calls.push(args);
+      return builder;
+    },
+    maybeSingle: async () => ({
+      data: { id: 'guide-profile-1', user_id: 'user-1', city: 'Seoul', languages: ['Korean'], intro: 'Intro', profile_image_path: '', status: 'pending' },
+      error: null
+    })
+  };
+  const fakeClient = {
+    from: (table) => {
+      assert.equal(table, 'guide_profiles');
+      return { select: () => builder };
+    }
+  };
+
+  const guideProfile = await fetchOwnedGuideProfile(fakeClient, 'user-1');
+
+  assert.equal(guideProfile.id, 'guide-profile-1');
+  assert.equal(guideProfile.status, 'pending');
+  assert.deepEqual(calls, [['user_id', 'user-1']]);
 });
 
 

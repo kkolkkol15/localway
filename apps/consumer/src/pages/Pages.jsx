@@ -15,7 +15,7 @@ import { buildTourFormPayloadFromTour, fetchGuideTours, filterGuideToursByStatus
 import { submitGuideApplication } from '../lib/guideApplications.js';
 import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
-import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, resolveGuideProfileImageUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
+import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, fetchOwnedGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, resolveGuideProfileImageUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
 import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -2199,7 +2199,7 @@ export function GuideMyToursPage() {
           const client = await createBrowserSupabaseClient();
           let guideProfileId = state.guideProfile?.id;
           if (!guideProfileId) {
-            const guideProfile = await fetchActiveGuideProfile(client, state.auth.user.id);
+            const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
             if (guideProfile?.id) {
               guideProfileId = guideProfile.id;
               dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
@@ -2344,7 +2344,7 @@ export function GuideTourDetailPage() {
         const client = await createBrowserSupabaseClient();
         let guideProfileId = state.guideProfile?.id;
         if (!guideProfileId) {
-          const guideProfile = await fetchActiveGuideProfile(client, state.auth.user.id);
+          const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
           if (guideProfile?.id) {
             guideProfileId = guideProfile.id;
             dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
@@ -2635,10 +2635,19 @@ export function TourCreatePage() {
   useEffect(() => {
     let active = true;
     async function loadEditableTour() {
-      if (!isEditMode || !state.guideProfile?.id) return;
+      if (!isEditMode || !state.auth.user?.id) return;
       try {
         const client = await createBrowserSupabaseClient();
-        const rows = await fetchGuideTours(client, { guideProfileId: state.guideProfile.id });
+        let guideProfileId = state.guideProfile?.id;
+        if (!guideProfileId) {
+          const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
+          if (guideProfile?.id) {
+            guideProfileId = guideProfile.id;
+            dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
+          }
+        }
+        if (!guideProfileId) throw new Error('Guide profile is required to load this tour.');
+        const rows = await fetchGuideTours(client, { guideProfileId });
         const tour = rows.find((item) => item.id === tourId);
         if (active && tour) setEditPayload(buildTourFormPayloadFromTour(tour));
         if (active && !tour) setDraftNotice('Tour not found.');
@@ -2650,7 +2659,7 @@ export function TourCreatePage() {
     return () => {
       active = false;
     };
-  }, [isEditMode, state.guideProfile?.id, tourId]);
+  }, [dispatch, isEditMode, state.auth.user?.id, state.guideProfile?.id, tourId]);
 
   useEffect(() => {
     if (!formSource) return;
