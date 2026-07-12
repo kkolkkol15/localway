@@ -12,6 +12,7 @@ import {
   fetchAdminConversations,
   fetchAdminMemberDetail,
   fetchAdminMembers,
+  fetchAdminTours,
   findOrCreateAdminConversation,
   mapProfileToAdminMember,
   mapConversationToAdminThread,
@@ -652,6 +653,40 @@ test('mapTourToAdminRow exposes pending change request details for admin review'
   assert.equal(row.pendingChangeRequest.id, 'request-1');
   assert.equal(row.pendingChangeRequest.requested.title, 'Updated title');
   assert.equal(row.pendingChangeRequest.requested.priceLabel, 'KRW 70,000');
+});
+
+test('fetchAdminTours still returns tours when change request table is unavailable', async () => {
+  const calls = [];
+  const client = {
+    request: async (table, options = {}) => {
+      calls.push([table, options]);
+      if (table === 'tours') {
+        if (options.query?.includes('tour_change_requests')) {
+          throw new Error('Could not find a relationship between tours and tour_change_requests in the schema cache');
+        }
+        return [{
+          id: 'tour-1',
+          title: 'Market tour',
+          status: 'active',
+          guide_profiles: { display_name: 'Guide Mina' },
+          tour_images: [],
+          reservations: []
+        }];
+      }
+      if (table === 'tour_change_requests') {
+        throw new Error('Could not find the table tour_change_requests in the schema cache');
+      }
+      return [];
+    }
+  };
+
+  const result = await fetchAdminTours(client);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 'tour-1');
+  assert.equal(result[0].reviewType, 'new');
+  assert.deepEqual(calls.map(([table]) => table), ['tours', 'tour_change_requests']);
+  assert.doesNotMatch(calls[0][1].query, /tour_change_requests/);
 });
 
 test('mapTourChangeRequestToAdminRow normalizes requested tour payload values', () => {

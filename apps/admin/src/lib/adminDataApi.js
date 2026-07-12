@@ -75,6 +75,10 @@ function normalizeList(value) {
   return [];
 }
 
+function encodeFilterList(values) {
+  return values.map((value) => `"${String(value).replaceAll('"', '\\"')}"`).join(',');
+}
+
 function normalizeGuideProfileDetail(profile = null) {
   if (!profile) return null;
   const [nativeLanguage = '', ...additionalLanguages] = profile.languages ?? [];
@@ -550,9 +554,23 @@ export async function fetchAdminConversations(client) {
 
 export async function fetchAdminTours(client) {
   const tours = await client.request('tours', {
-    query: '?select=*,guide_profiles(display_name),tour_images(image_path,sort_order),reservations(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)&order=created_at.desc'
+    query: '?select=*,guide_profiles(display_name),tour_images(image_path,sort_order),reservations(id)&order=created_at.desc'
   });
-  return tours.map(mapTourToAdminRow);
+  const tourIds = tours.map((tour) => tour.id).filter(Boolean);
+  const changeRequests = tourIds.length
+    ? await client.request('tour_change_requests', {
+      query: `?select=id,tour_id,status,payload,created_at,reviewed_at,rejection_reason&tour_id=in.(${encodeFilterList(tourIds)})&order=created_at.desc`
+    }).catch(() => [])
+    : [];
+  const requestsByTourId = changeRequests.reduce((groups, request) => {
+    const tourId = request?.tour_id;
+    if (!tourId) return groups;
+    return { ...groups, [tourId]: [...(groups[tourId] ?? []), request] };
+  }, {});
+  return tours.map((tour) => mapTourToAdminRow({
+    ...tour,
+    tour_change_requests: requestsByTourId[tour.id] ?? []
+  }));
 }
 
 export async function updateProfileStatus(client, { profileId, status }) {

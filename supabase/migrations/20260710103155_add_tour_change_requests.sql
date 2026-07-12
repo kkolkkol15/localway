@@ -26,6 +26,8 @@ for each row execute function public.set_updated_at();
 
 alter table public.tour_change_requests enable row level security;
 
+grant select, insert, update on public.tour_change_requests to authenticated;
+
 drop policy if exists "tour_change_requests_guide_select_own" on public.tour_change_requests;
 create policy "tour_change_requests_guide_select_own"
 on public.tour_change_requests
