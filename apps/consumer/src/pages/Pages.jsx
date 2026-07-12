@@ -2071,6 +2071,7 @@ export function GuideModePage() {
           </div>
         </div>
         <div className="guide-mode-header-actions">
+          <Link className="guide-mode-secondary-action" to="/mypage/guide-mode/tours">My Tours</Link>
           <Link className="guide-mode-secondary-action" to="/mypage/settings?section=guide-profile&edit=1">Guide profile</Link>
           <Link className="guide-mode-primary-action" to="/mypage/guide-mode/new">New Tour</Link>
         </div>
