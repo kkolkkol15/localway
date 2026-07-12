@@ -7,6 +7,7 @@ import { Footer } from './components/Footer.jsx';
 import { Toast } from './components/Toast.jsx';
 import { fetchBookmarkIds } from './lib/customerApi.js';
 import { createBrowserSupabaseClient, getSupabaseConfig } from './lib/supabaseAuth.js';
+import { isRegisteredGuideRole } from './state/appStore.js';
 import {
   HomePage, SearchPage, TourDetailPage, PaymentPage, BookingSuccessPage, LoginPage,
   GuideRegistrationPage, MyPage, GuideModePage, GuideMyToursPage, GuideTourDetailPage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
@@ -20,7 +21,7 @@ function ProtectedRoute({ children, guideOnly = false }) {
   if (!state.auth.isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
-  if (guideOnly && state.auth.user?.role !== 'guide' && !state.guideProfile?.id) {
+  if (guideOnly && !isRegisteredGuideRole(state.auth.user?.role, state.auth.user?.isGuide) && !state.guideProfile?.id) {
     return <Navigate to="/register-guide" replace />;
   }
   return children;
