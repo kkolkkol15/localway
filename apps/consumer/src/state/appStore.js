@@ -118,6 +118,25 @@ export function appReducer(state, action) {
         },
         'Logged in'
       );
+    case 'REFRESH_AUTH_PROFILE':
+      return {
+        ...state,
+        auth: {
+          ...state.auth,
+          isAuthenticated: true,
+          error: '',
+          user: {
+            ...state.auth.user,
+            id: action.payload.user.id,
+            email: action.payload.user.email,
+            name: action.payload.user.displayName ?? action.payload.user.name ?? state.auth.user?.name,
+            avatar: action.payload.user.avatar ?? state.auth.user?.avatar ?? '',
+            role: action.payload.user.role ?? state.auth.user?.role ?? 'traveler',
+            isGuide: Boolean(action.payload.user.isGuide)
+          }
+        },
+        guideProfile: action.payload.guideProfile ?? state.guideProfile
+      };
     case 'AUTH_ERROR':
       return { ...state, auth: { isAuthenticated: false, user: null, error: action.payload.message } };
     case 'LOGOUT':
@@ -141,13 +160,6 @@ export function appReducer(state, action) {
       return toast(
         {
           ...state,
-          auth: {
-            ...state.auth,
-            user: {
-              ...state.auth.user,
-              avatar: action.payload.profilePhotoUrl || state.auth.user?.avatar || ''
-            }
-          },
           guideProfile: {
             ...(state.guideProfile ?? {}),
             ...action.payload,
@@ -249,8 +261,7 @@ export function appReducer(state, action) {
             ...state.auth,
             user: {
               ...state.auth.user,
-              role: 'pending-guide',
-              avatar: action.payload.profilePhotoUrl || state.auth.user?.avatar || ''
+              role: 'pending-guide'
             }
           },
           guideProfile: { ...action.payload, status: 'pending' }

@@ -242,6 +242,16 @@ export async function signInWithEmail(client, { email, password }) {
   return { user: mapAuthUser(data.user, profile), guideProfile: mapGuideProfile(guideProfile) };
 }
 
+export async function fetchCurrentAuthState(client) {
+  const { data, error } = await client.auth.getUser();
+  if (error) throw error;
+  if (!data?.user) return null;
+
+  const profile = resolveProfileAvatar(client, await getProfile(client, data.user.id));
+  const guideProfile = (profile?.is_guide || ['guide', 'admin'].includes(profile?.role)) ? await getGuideProfile(client, data.user.id) : null;
+  return { user: mapAuthUser(data.user, profile), guideProfile: mapGuideProfile(guideProfile) };
+}
+
 export async function fetchActiveGuideProfile(client, userId) {
   if (!userId) return null;
   return mapGuideProfile(await getGuideProfile(client, userId));

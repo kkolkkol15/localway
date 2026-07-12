@@ -1,3 +1,12 @@
+import { resolvePublicStorageUrl } from './supabaseAuth.js';
+
+export const guideTourStatusFilters = [
+  { value: 'all', label: 'All' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' }
+];
+
 export function buildTourRow(payload, { guideProfileId, fallbackCity = '' }) {
   if (!guideProfileId) throw new Error('A guide profile id is required to publish a tour.');
 
@@ -7,6 +16,64 @@ export function buildTourRow(payload, { guideProfileId, fallbackCity = '' }) {
     guide_id: guideProfileId,
     ...editablePayload,
     status: 'pending'
+  };
+}
+
+export function getGuideTourStatusFilter(status = '') {
+  if (status === 'active' || status === 'approved') return 'approved';
+  if (status === 'pending') return 'pending';
+  if (status === 'rejected') return 'rejected';
+  return 'draft';
+}
+
+export function getGuideTourStatusLabel(status = '') {
+  return ({
+    active: 'Approved',
+    approved: 'Approved',
+    pending: 'Pending',
+    rejected: 'Rejected',
+    paused: 'Paused',
+    draft: 'Draft'
+  })[status] ?? 'Draft';
+}
+
+export function filterGuideToursByStatus(tours = [], status = 'all') {
+  if (status === 'all') return tours;
+  return tours.filter((tour) => getGuideTourStatusFilter(tour.status) === status);
+}
+
+function formatGuideTourDate(value = '') {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function formatGuideTourPrice(tour = {}) {
+  const amount = Number(tour.price_amount ?? 0);
+  const cleanAmount = Number.isFinite(amount) ? amount : 0;
+  return `${tour.currency || 'USD'} ${cleanAmount}`;
+}
+
+export function mapGuideTourListItem(tour = {}) {
+  const images = [...(tour.tour_images ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const thumbnailPath = images[0]?.image_path || '';
+  const statusFilter = getGuideTourStatusFilter(tour.status);
+  const pendingRequest = (tour.tour_change_requests ?? []).find((request) => request.status === 'pending') ?? null;
+
+  return {
+    ...tour,
+    title: tour.title || 'Untitled tour',
+    locationLabel: [tour.city, tour.type].filter(Boolean).join(' · ') || '-',
+    thumbnail: thumbnailPath ? resolvePublicStorageUrl('tour-images', thumbnailPath) : '',
+    statusFilter,
+    statusLabel: getGuideTourStatusLabel(tour.status),
+    priceLabel: formatGuideTourPrice(tour),
+    bookingCount: tour.reservations?.length ?? 0,
+    wishlistCount: tour.bookmarks?.length ?? 0,
+    createdDateLabel: formatGuideTourDate(tour.created_at),
+    updatedDateLabel: formatGuideTourDate(tour.updated_at),
+    pendingRequest
   };
 }
 
@@ -98,9 +165,9 @@ export async function fetchGuideTours(client, { guideProfileId }) {
   if (!guideProfileId) throw new Error('A guide profile id is required to load guide tours.');
   const { data, error } = await client
     .from('tours')
-    .select('*,tour_images(image_path,sort_order),reservations(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)')
+    .select('*,tour_images(image_path,sort_order),reservations(id),bookmarks(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)')
     .eq('guide_id', guideProfileId)
-    .order('updated_at', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
   return data ?? [];

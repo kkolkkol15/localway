@@ -4,7 +4,10 @@ import {
   buildTourChangeRequestRow,
   buildTourFormPayloadFromTour,
   buildTourRow,
+  filterGuideToursByStatus,
   fetchGuideTours,
+  getGuideTourStatusLabel,
+  mapGuideTourListItem,
   submitTourChangeRequest
 } from '../lib/guideTours.js';
 
@@ -144,10 +147,70 @@ test('fetchGuideTours loads a guide tour list with pending change requests', asy
 
   assert.deepEqual(result, [{ id: 'tour-1', title: 'Market walk' }]);
   assert.deepEqual(calls, [
-    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)'],
+    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),bookmarks(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)'],
     ['eq', 'guide_id', 'guide-1'],
-    ['order', 'updated_at', { ascending: false }]
+    ['order', 'created_at', { ascending: false }]
   ]);
+});
+
+test('getGuideTourStatusLabel maps active tours to approved for guide UI', () => {
+  assert.equal(getGuideTourStatusLabel('active'), 'Approved');
+  assert.equal(getGuideTourStatusLabel('pending'), 'Pending');
+  assert.equal(getGuideTourStatusLabel('rejected'), 'Rejected');
+  assert.equal(getGuideTourStatusLabel('unknown'), 'Draft');
+});
+
+test('filterGuideToursByStatus groups active tours under approved', () => {
+  const tours = [
+    { id: 'tour-1', status: 'active' },
+    { id: 'tour-2', status: 'pending' },
+    { id: 'tour-3', status: 'rejected' }
+  ];
+
+  assert.deepEqual(filterGuideToursByStatus(tours, 'all').map((tour) => tour.id), ['tour-1', 'tour-2', 'tour-3']);
+  assert.deepEqual(filterGuideToursByStatus(tours, 'approved').map((tour) => tour.id), ['tour-1']);
+  assert.deepEqual(filterGuideToursByStatus(tours, 'pending').map((tour) => tour.id), ['tour-2']);
+});
+
+test('mapGuideTourListItem prepares thumbnail, counts, dates, and fallback values', () => {
+  const mapped = mapGuideTourListItem({
+    id: 'tour-1',
+    title: 'Market walk',
+    city: 'Seoul',
+    type: 'Food',
+    status: 'active',
+    price_amount: 50000,
+    currency: 'KRW',
+    payment_type: 'package',
+    created_at: '2026-07-10T09:00:00Z',
+    updated_at: '2026-07-11T10:00:00Z',
+    tour_images: [
+      { image_path: 'second.png', sort_order: 2 },
+      { image_path: 'first.png', sort_order: 1 }
+    ],
+    reservations: [{ id: 'reservation-1' }],
+    bookmarks: [{ id: 'bookmark-1' }, { id: 'bookmark-2' }]
+  });
+
+  assert.equal(mapped.thumbnail, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/first.png');
+  assert.equal(mapped.statusLabel, 'Approved');
+  assert.equal(mapped.statusFilter, 'approved');
+  assert.equal(mapped.priceLabel, 'KRW 50000');
+  assert.equal(mapped.bookingCount, 1);
+  assert.equal(mapped.wishlistCount, 2);
+  assert.equal(mapped.createdDateLabel, 'Jul 10, 2026');
+  assert.equal(mapped.updatedDateLabel, 'Jul 11, 2026');
+});
+
+test('mapGuideTourListItem handles missing images and counts safely', () => {
+  const mapped = mapGuideTourListItem({ id: 'tour-1' });
+
+  assert.equal(mapped.thumbnail, '');
+  assert.equal(mapped.title, 'Untitled tour');
+  assert.equal(mapped.locationLabel, '-');
+  assert.equal(mapped.bookingCount, 0);
+  assert.equal(mapped.wishlistCount, 0);
+  assert.equal(mapped.createdDateLabel, '-');
 });
 
 test('submitTourChangeRequest calls the RPC with a normalized edit payload', async () => {
