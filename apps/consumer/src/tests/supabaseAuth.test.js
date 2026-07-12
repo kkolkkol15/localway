@@ -4,6 +4,8 @@ import {
   buildSignupDisplayName,
   buildSupabaseAuthOptions,
   fetchActiveGuideProfile,
+  fetchCurrentAuthState,
+  fetchOwnedGuideProfile,
   getAuthErrorMessage,
   getSupabaseConfig,
   mapAuthUser,
@@ -251,6 +253,32 @@ test('fetchActiveGuideProfile maps an active guide profile by user id', async ()
   assert.deepEqual(calls, [['user_id', 'user-1'], ['status', 'active']]);
 });
 
+test('fetchOwnedGuideProfile loads the current guide profile without active status filtering', async () => {
+  const calls = [];
+  const builder = {
+    eq: (...args) => {
+      calls.push(args);
+      return builder;
+    },
+    maybeSingle: async () => ({
+      data: { id: 'guide-profile-1', user_id: 'user-1', city: 'Seoul', languages: ['Korean'], intro: 'Intro', profile_image_path: '', status: 'pending' },
+      error: null
+    })
+  };
+  const fakeClient = {
+    from: (table) => {
+      assert.equal(table, 'guide_profiles');
+      return { select: () => builder };
+    }
+  };
+
+  const guideProfile = await fetchOwnedGuideProfile(fakeClient, 'user-1');
+
+  assert.equal(guideProfile.id, 'guide-profile-1');
+  assert.equal(guideProfile.status, 'pending');
+  assert.deepEqual(calls, [['user_id', 'user-1']]);
+});
+
 
 test('buildSignupDisplayName combines first and last name', () => {
   assert.equal(buildSignupDisplayName(' Mina ', ' Kim '), 'Mina Kim');
@@ -462,4 +490,45 @@ test('signInWithEmail returns mapped profile after password login', async () => 
     role: 'traveler',
     isGuide: false
   });
+});
+
+test('fetchCurrentAuthState refreshes member avatar from profiles instead of guide image state', async () => {
+  const calls = [];
+  const makeQuery = (table) => {
+    const builder = {
+      eq: (...args) => {
+        calls.push([table, ...args]);
+        return builder;
+      },
+      maybeSingle: async () => ({
+        data: table === 'profiles'
+          ? { display_name: 'Mina', avatar_path: 'user-1/member.png', role: 'traveler', is_guide: true }
+          : { id: 'guide-profile-1', user_id: 'user-1', city: 'Seoul', languages: ['Korean'], intro: 'Intro', profile_image_path: 'avatars/user-1/guide.png', status: 'active' },
+        error: null
+      })
+    };
+    return { select: () => builder };
+  };
+  const fakeClient = {
+    auth: {
+      getUser: async () => ({
+        data: { user: { id: 'user-1', email: 'mina@example.com', user_metadata: {} } },
+        error: null
+      })
+    },
+    from: (table) => makeQuery(table),
+    storage: {
+      from: (bucket) => ({
+        getPublicUrl: (path) => ({
+          data: { publicUrl: `https://assets.example.com/${bucket}/${path}` }
+        })
+      })
+    }
+  };
+
+  const result = await fetchCurrentAuthState(fakeClient);
+
+  assert.equal(result.user.avatar, 'https://assets.example.com/avatars/user-1/member.png');
+  assert.equal(result.guideProfile.profilePhotoUrl, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/avatars/user-1/guide.png');
+  assert.deepEqual(calls.filter(([table]) => table === 'guide_profiles').map(([, column]) => column), ['user_id', 'status']);
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, GripVertical, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
+import { BadgeCheck, Bell, Bold, CalendarDays, Camera, Check, ChevronRight, CreditCard, DollarSign, Globe2, GripVertical, Heart, ImagePlus, Italic, List, LockKeyhole, MessageCircle, Package, Pencil, RefreshCw, Search, Send, Share2, ShieldCheck, SlidersHorizontal, SmilePlus, Star, Table2, Trash2, Type, Upload, UserRound, Video, WalletCards } from 'lucide-react';
 import { cities, faqs, languages, tourTypes, tours, transports } from '../data/mockData.js';
 import { useAppState } from '../state/AppContext.jsx';
 import { useMessageBadge } from '../state/MessageBadgeContext.jsx';
@@ -9,13 +9,13 @@ import { formatRoleLabel, isRegisteredGuideRole, selectors } from '../state/appS
 import { Modal, SkeletonGrid, TourCard } from '../components/UI.jsx';
 import { validateGuideProfilePhoto } from '../lib/guidePhoto.js';
 import { expandDateRange, getCalendarUnavailableSelection, saveGuideUnavailableDates } from '../lib/guideAvailability.js';
-import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js';
+import { getGuideModeOverview } from '../lib/guideMode.js';
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
-import { buildTourFormPayloadFromTour, fetchGuideTours, publishGuideTour, submitTourChangeRequest } from '../lib/guideTours.js';
+import { buildTourFormPayloadFromTour, fetchGuideTours, filterGuideToursByStatus, guideTourStatusFilters, mapGuideTourListItem, publishGuideTour, submitTourChangeRequest } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
 import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
-import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
+import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, fetchOwnedGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, resolveGuideProfileImageUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
 import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -1468,12 +1468,16 @@ export function AccountSettingsPage() {
           currentProfile: state.guideProfile
         });
       }
+      const savedProfilePhotoUrl = resolveGuideProfileImageUrl(null, savedProfile?.profile_image_path || '')
+        || resolveGuideProfileImageUrl(null, payload.profilePhotoUrl || '')
+        || state.guideProfile?.profilePhotoUrl
+        || '';
       dispatch({
         type: 'UPDATE_GUIDE_PROFILE',
         payload: {
           ...payload,
           id: state.guideProfile?.id,
-          profilePhotoUrl: savedProfile?.profile_image_path || payload.profilePhotoUrl || state.guideProfile?.profilePhotoUrl || state.auth.user.avatar,
+          profilePhotoUrl: savedProfilePhotoUrl,
           profilePhotoName: payload.profilePhotoName || state.guideProfile?.profilePhotoName || '',
           status: savedProfile?.status || state.guideProfile?.status
         }
@@ -1993,7 +1997,6 @@ export function GuideModePage() {
     unavailableDates,
     reviewsWritten: state.reviewsWritten
   });
-  const guideSections = getGuideModeSections();
   const pendingDates = useMemo(() => {
     if (!startDate) return [];
     try {
@@ -2078,17 +2081,6 @@ export function GuideModePage() {
         <GuideOverviewMetric label="Blocked dates" value={guideOverview.unavailableDates} detail="Unavailable calendar days" />
         <GuideOverviewMetric label="Earnings" value={`$${guideOverview.estimatedEarnings}`} detail="Completed bookings" />
       </div>
-      <section className="guide-workbench">
-        <div className="guide-section-heading">
-          <h2>Guide operations</h2>
-          <span>{guideSections.length} tools</span>
-        </div>
-        <div className="guide-action-grid">
-          {guideSections.map((section) => (
-            <GuideModeActionCard section={section} overview={guideOverview} key={section.id} />
-          ))}
-        </div>
-      </section>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Panel title="Upcoming Bookings" items={state.bookings.map((b) => `${b.date} ${b.time}`)} />
         <GuideDraftsPanel drafts={tourDrafts} />
@@ -2125,23 +2117,6 @@ export function GuideModePage() {
   );
 }
 
-const guideModeActionMeta = {
-  'my-tours': { Icon: Package, value: '0', href: '/mypage/guide-mode/tours' },
-  'create-tour': { Icon: Upload, value: '+', href: '/mypage/guide-mode/new' },
-  'saved-drafts': { Icon: List, valueKey: 'savedDrafts', href: null },
-  calendar: { Icon: CalendarDays, valueKey: 'unavailableDates', href: null },
-  'booking-requests': { Icon: Check, valueKey: 'upcomingTrips', href: null },
-  messages: { Icon: MessageCircle, value: '0', href: '/messages' },
-  reviews: { Icon: Star, valueKey: 'reviews', href: '/mypage/reviews' },
-  earnings: { Icon: DollarSign, valueKey: 'estimatedEarnings', href: '/mypage/guide-mode/payments' },
-  'payments-payouts': { Icon: WalletCards, value: 'Setup', href: '/mypage/guide-mode/payments' },
-  'guide-profile': { Icon: UserRound, value: 'Edit', href: '/mypage/settings?section=guide-profile&edit=1' },
-  performance: { Icon: SlidersHorizontal, value: 'New', href: null },
-  'policy-center': { Icon: ShieldCheck, value: 'Review', href: '/policies' },
-  support: { Icon: Send, value: 'Open', href: '/support' },
-  donation: { Icon: Heart, value: 'Off', href: null }
-};
-
 function GuideOverviewMetric({ label, value, detail }) {
   return (
     <article className="guide-overview-card">
@@ -2150,29 +2125,6 @@ function GuideOverviewMetric({ label, value, detail }) {
       <small>{detail}</small>
     </article>
   );
-}
-
-function GuideModeActionCard({ section, overview }) {
-  const meta = guideModeActionMeta[section.id] ?? { Icon: ChevronRight, value: '', href: null };
-  const Icon = meta.Icon;
-  const rawValue = meta.valueKey ? overview[meta.valueKey] : meta.value;
-  const value = section.id === 'earnings' ? `$${rawValue || 0}` : rawValue;
-  const content = (
-    <>
-      <span className="guide-action-icon"><Icon size={20} /></span>
-      <span className="guide-action-copy">
-        <b>{section.label}</b>
-        <small>{section.description}</small>
-      </span>
-      <span className="guide-action-value">{value}</span>
-    </>
-  );
-
-  if (meta.href) {
-    return <Link className="guide-action-card" to={meta.href}>{content}</Link>;
-  }
-
-  return <button className="guide-action-card" type="button">{content}</button>;
 }
 
 function Panel({ title, items }) {
@@ -2219,47 +2171,58 @@ function GuideDraftsPanel({ drafts }) {
   );
 }
 
-function guideTourStatusLabel(status) {
-  return ({
-    draft: 'Draft',
-    pending: 'Admin review',
-    active: 'Active',
-    paused: 'Paused',
-    rejected: 'Rejected'
-  })[status] ?? status ?? '-';
-}
-
-function formatGuideTourPrice(tour = {}) {
-  const amount = Number(tour.price_amount ?? 0).toLocaleString('en-US');
-  return `${tour.currency || 'USD'} ${amount}`;
-}
-
 export function GuideMyToursPage() {
-  const { state } = useAppState();
+  const { state, dispatch } = useAppState();
+  const navigate = useNavigate();
   const [guideTours, setGuideTours] = useState([]);
+  const [activeStatus, setActiveStatus] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
   const [notice, setNotice] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
+  const mappedTours = useMemo(() => guideTours.map(mapGuideTourListItem), [guideTours]);
+  const filteredTours = useMemo(() => filterGuideToursByStatus(mappedTours, activeStatus), [activeStatus, mappedTours]);
+  const statusCounts = useMemo(() => guideTourStatusFilters.reduce((counts, filter) => {
+    counts[filter.value] = filter.value === 'all' ? mappedTours.length : filterGuideToursByStatus(mappedTours, filter.value).length;
+    return counts;
+  }, {}), [mappedTours]);
 
   useEffect(() => {
     let active = true;
     async function loadTours() {
-      if (!state.guideProfile?.id) return;
+      if (!state.auth.user?.id) return;
+      setLoading(true);
+      setErrorMessage('');
+      setNotice('');
       try {
         if (getSupabaseConfig().isConfigured) {
           const client = await createBrowserSupabaseClient();
-          const rows = await fetchGuideTours(client, { guideProfileId: state.guideProfile.id });
+          let guideProfileId = state.guideProfile?.id;
+          if (!guideProfileId) {
+            const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
+            if (guideProfile?.id) {
+              guideProfileId = guideProfile.id;
+              dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
+            }
+          }
+          if (!guideProfileId) throw new Error('Guide profile is required to load your tours.');
+          const rows = await fetchGuideTours(client, { guideProfileId });
           if (active) setGuideTours(rows);
         } else if (active) {
+          setGuideTours([]);
           setNotice('Supabase is not configured. Published guide tours will appear here after database connection.');
         }
       } catch (error) {
-        if (active) setNotice(getAuthErrorMessage(error));
+        if (active) setErrorMessage(getAuthErrorMessage(error));
+      } finally {
+        if (active) setLoading(false);
       }
     }
     loadTours();
     return () => {
       active = false;
     };
-  }, [state.guideProfile?.id]);
+  }, [dispatch, retryKey, state.auth.user?.id, state.guideProfile?.id]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
@@ -2270,36 +2233,202 @@ export function GuideMyToursPage() {
         </div>
         <div className="guide-mode-header-actions">
           <Link className="guide-mode-secondary-action" to="/mypage/guide-mode">Back</Link>
-          <Link className="guide-mode-primary-action" to="/mypage/guide-mode/new">New Tour</Link>
+          <Link className="guide-mode-primary-action" to="/mypage/guide-mode/new">Create New Tour</Link>
         </div>
       </div>
       {notice && <p className="tour-draft-notice mt-4">{notice}</p>}
-      <section className="guide-tour-list">
-        {guideTours.length ? guideTours.map((tour) => {
-          const pendingRequest = (tour.tour_change_requests ?? []).find((request) => request.status === 'pending');
-          return (
-            <article className="guide-tour-card" key={tour.id}>
-              <div>
-                <span className={`guide-tour-status ${tour.status || 'draft'}`}>{guideTourStatusLabel(tour.status)}</span>
-                <h2>{tour.title || 'Untitled tour'}</h2>
-                <p>{tour.city || '-'} · {tour.type || '-'} · {formatGuideTourPrice(tour)}</p>
-                <small>{pendingRequest ? 'Edit request is waiting for admin review.' : `Updated ${tour.updated_at ? new Date(tour.updated_at).toLocaleString() : '-'}`}</small>
+      <div className="guide-tour-tabs" role="tablist" aria-label="Filter my tours by status">
+        {guideTourStatusFilters.map((filter) => (
+          <button
+            className={activeStatus === filter.value ? 'active' : ''}
+            type="button"
+            onClick={() => setActiveStatus(filter.value)}
+            key={filter.value}
+          >
+            {filter.label}<span>{statusCounts[filter.value] ?? 0}</span>
+          </button>
+        ))}
+      </div>
+      {loading ? (
+        <section className="guide-tour-list">
+          {[1, 2, 3].map((item) => <div className="guide-tour-skeleton" key={item} />)}
+        </section>
+      ) : errorMessage ? (
+        <div className="guide-tour-empty">
+          <Package size={28} />
+          <b>Could not load your tours</b>
+          <p>{errorMessage}</p>
+          <button type="button" onClick={() => setRetryKey((value) => value + 1)}><RefreshCw size={16} /> Retry</button>
+        </div>
+      ) : filteredTours.length ? (
+        <section className="guide-tour-list">
+          {filteredTours.map((tour) => (
+            <article
+              className="guide-tour-card"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/mypage/guide-mode/tours/${encodeURIComponent(tour.id)}`)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') navigate(`/mypage/guide-mode/tours/${encodeURIComponent(tour.id)}`);
+              }}
+              key={tour.id}
+            >
+              <div className="guide-tour-thumb">
+                {tour.thumbnail ? <img src={tour.thumbnail} alt="" loading="lazy" /> : <span>No image</span>}
+              </div>
+              <div className="guide-tour-card-copy">
+                <div className="guide-tour-card-topline">
+                  <span className={`guide-tour-status ${tour.statusFilter}`}>{tour.statusLabel}</span>
+                  {tour.pendingRequest && <span className="guide-tour-review-note">Edit under review</span>}
+                </div>
+                <h2>{tour.title}</h2>
+                <p>{tour.locationLabel}</p>
+                <strong>{tour.priceLabel}</strong>
+                <dl>
+                  <div><dt>Created</dt><dd>{tour.createdDateLabel}</dd></div>
+                  <div><dt>Updated</dt><dd>{tour.updatedDateLabel}</dd></div>
+                  <div><dt>Bookings</dt><dd>{tour.bookingCount}</dd></div>
+                  <div><dt>Wishlists</dt><dd>{tour.wishlistCount}</dd></div>
+                </dl>
               </div>
               <div className="guide-tour-card-actions">
-                <span>{tour.reservations?.length ?? 0} bookings</span>
-                <Link to={`/mypage/guide-mode/tours/${encodeURIComponent(tour.id)}/edit`}>Edit</Link>
+                <button
+                  type="button"
+                  aria-label={`Edit ${tour.title}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    navigate(`/mypage/guide-mode/tours/${encodeURIComponent(tour.id)}/edit`);
+                  }}
+                >
+                  <Pencil size={17} /> Edit
+                </button>
               </div>
             </article>
-          );
-        }) : (
+          ))}
+        </section>
+      ) : (
           <div className="guide-tour-empty">
             <Package size={28} />
-            <b>No tours submitted yet</b>
-            <p>Create a new tour and it will appear here after submission.</p>
+            <b>{guideTours.length ? 'No tours match this status' : 'Create your first tour and start meeting travellers'}</b>
+            <p>{guideTours.length ? 'Try another status tab to see more submitted tours.' : 'Create a new tour and it will appear here after submission.'}</p>
             <Link to="/mypage/guide-mode/new">Create New Tour</Link>
           </div>
-        )}
-      </section>
+      )}
+    </main>
+  );
+}
+
+export function GuideTourDetailPage() {
+  const { state, dispatch } = useAppState();
+  const navigate = useNavigate();
+  const { tourId } = useParams();
+  const [tour, setTour] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
+  const displayTour = useMemo(() => tour ? mapGuideTourListItem(tour) : null, [tour]);
+  const gallery = useMemo(() => [...(tour?.tour_images ?? [])]
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((image) => mapGuideTourListItem({ tour_images: [image] }).thumbnail)
+    .filter(Boolean), [tour?.tour_images]);
+  const safeContentHtml = useMemo(() => sanitizeTourContentHtml(tour?.content_html || ''), [tour?.content_html]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadTour() {
+      if (!state.auth.user?.id || !tourId) return;
+      setLoading(true);
+      setErrorMessage('');
+      try {
+        const client = await createBrowserSupabaseClient();
+        let guideProfileId = state.guideProfile?.id;
+        if (!guideProfileId) {
+          const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
+          if (guideProfile?.id) {
+            guideProfileId = guideProfile.id;
+            dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
+          }
+        }
+        if (!guideProfileId) throw new Error('Guide profile is required to load this tour.');
+        const rows = await fetchGuideTours(client, { guideProfileId });
+        const nextTour = rows.find((item) => item.id === tourId);
+        if (!nextTour) throw new Error('Tour not found or not owned by this guide.');
+        if (active) setTour(nextTour);
+      } catch (error) {
+        if (active) setErrorMessage(getAuthErrorMessage(error));
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadTour();
+    return () => {
+      active = false;
+    };
+  }, [dispatch, retryKey, state.auth.user?.id, state.guideProfile?.id, tourId]);
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="guide-mode-header">
+        <div>
+          <h1 className="text-3xl font-black">Tour Details</h1>
+          <p className="text-sm font-semibold text-zinc-500">Review how this submitted tour is stored for admin approval.</p>
+        </div>
+        <div className="guide-mode-header-actions">
+          <button className="guide-mode-secondary-action" type="button" onClick={() => navigate('/mypage/guide-mode/tours')}>Back</button>
+          {displayTour && <Link className="guide-mode-primary-action" to={`/mypage/guide-mode/tours/${encodeURIComponent(displayTour.id)}/edit`}>Edit Tour</Link>}
+        </div>
+      </div>
+      {loading ? (
+        <section className="guide-tour-detail-shell"><div className="guide-tour-skeleton" /></section>
+      ) : errorMessage ? (
+        <div className="guide-tour-empty">
+          <Package size={28} />
+          <b>Could not load this tour</b>
+          <p>{errorMessage}</p>
+          <button type="button" onClick={() => setRetryKey((value) => value + 1)}><RefreshCw size={16} /> Retry</button>
+        </div>
+      ) : displayTour && (
+        <section className="guide-tour-detail-shell">
+          <div className="guide-tour-detail-hero">
+            {displayTour.thumbnail ? <img src={displayTour.thumbnail} alt="" /> : <span>No image</span>}
+          </div>
+          <div className="guide-tour-detail-content">
+            <span className={`guide-tour-status ${displayTour.statusFilter}`}>{displayTour.statusLabel}</span>
+            <h2>{displayTour.title}</h2>
+            <p>{displayTour.locationLabel}</p>
+            <div className="guide-tour-detail-stats">
+              <article><b>{displayTour.priceLabel}</b><span>Price</span></article>
+              <article><b>{tour.duration_minutes || '-'} min</b><span>Duration</span></article>
+              <article><b>{tour.max_people || '-'}</b><span>Max people</span></article>
+              <article><b>{displayTour.bookingCount}</b><span>Bookings</span></article>
+            </div>
+            <div className="guide-tour-detail-section">
+              <h3>Description</h3>
+              <p>{tour.description || 'No description provided.'}</p>
+            </div>
+            {safeContentHtml && (
+              <div className="guide-tour-detail-section">
+                <h3>Tour content</h3>
+                <div className="tour-rich-content" dangerouslySetInnerHTML={{ __html: safeContentHtml }} />
+              </div>
+            )}
+            {gallery.length > 1 && (
+              <div className="guide-tour-detail-section">
+                <h3>Gallery</h3>
+                <div className="guide-tour-detail-gallery">
+                  {gallery.slice(1).map((image) => <img src={image} alt="" loading="lazy" key={image} />)}
+                </div>
+              </div>
+            )}
+            <div className="guide-tour-detail-meta">
+              <span>Created {displayTour.createdDateLabel}</span>
+              <span>Updated {displayTour.updatedDateLabel}</span>
+              {displayTour.pendingRequest && <span>Edit request is waiting for admin review.</span>}
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
@@ -2479,6 +2608,7 @@ function RichContentEditor({ blocks, onChange, onUploadImage, onUploadVideo, onN
 
 export function TourCreatePage() {
   const { state, dispatch } = useAppState();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { tourId } = useParams();
   const draftIdFromUrl = searchParams.get('draftId');
@@ -2505,10 +2635,19 @@ export function TourCreatePage() {
   useEffect(() => {
     let active = true;
     async function loadEditableTour() {
-      if (!isEditMode || !state.guideProfile?.id) return;
+      if (!isEditMode || !state.auth.user?.id) return;
       try {
         const client = await createBrowserSupabaseClient();
-        const rows = await fetchGuideTours(client, { guideProfileId: state.guideProfile.id });
+        let guideProfileId = state.guideProfile?.id;
+        if (!guideProfileId) {
+          const guideProfile = await fetchOwnedGuideProfile(client, state.auth.user.id);
+          if (guideProfile?.id) {
+            guideProfileId = guideProfile.id;
+            dispatch({ type: 'SET_GUIDE_PROFILE', payload: { guideProfile } });
+          }
+        }
+        if (!guideProfileId) throw new Error('Guide profile is required to load this tour.');
+        const rows = await fetchGuideTours(client, { guideProfileId });
         const tour = rows.find((item) => item.id === tourId);
         if (active && tour) setEditPayload(buildTourFormPayloadFromTour(tour));
         if (active && !tour) setDraftNotice('Tour not found.');
@@ -2520,7 +2659,7 @@ export function TourCreatePage() {
     return () => {
       active = false;
     };
-  }, [isEditMode, state.guideProfile?.id, tourId]);
+  }, [dispatch, isEditMode, state.auth.user?.id, state.guideProfile?.id, tourId]);
 
   useEffect(() => {
     if (!formSource) return;
@@ -2541,7 +2680,9 @@ export function TourCreatePage() {
         const client = await createBrowserSupabaseClient();
         if (isEditMode) {
           await submitTourChangeRequest(client, { tourId, payload });
-          setDraftNotice('Edit request submitted. This tour is now paused until admin review.');
+          dispatch({ type: 'SHOW_TOAST', payload: { message: 'Edit request submitted for admin review.' } });
+          navigate('/mypage/guide-mode/tours');
+          return;
         } else {
           await publishGuideTour(client, {
             payload,

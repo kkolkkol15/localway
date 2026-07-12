@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getGuideModeOverview, getGuideModeSections } from '../lib/guideMode.js';
+import { getGuideModeOverview } from '../lib/guideMode.js';
 import { appReducer, createInitialState, formatRoleLabel, isRegisteredGuideRole, restorePersistentState, selectors, serializePersistentState, serializeSessionState } from '../state/appStore.js';
 
 const signedInAction = {
@@ -61,6 +61,38 @@ test('email auth success stores an approved guide profile when returned', () => 
 
   assert.equal(authed.auth.user.role, 'guide');
   assert.equal(authed.guideProfile.id, 'guide-profile-1');
+});
+
+test('refresh auth profile replaces stale session avatar from database without login toast', () => {
+  let state = appReducer(createInitialState(), signedInAction);
+  state = {
+    ...state,
+    auth: {
+      ...state.auth,
+      user: { ...state.auth.user, avatar: 'guide-verification/user-1/profile.png' }
+    },
+    toast: null
+  };
+
+  const refreshed = appReducer(state, {
+    type: 'REFRESH_AUTH_PROFILE',
+    payload: {
+      user: {
+        id: 'user-1',
+        email: 'mina@example.com',
+        name: 'Mina',
+        avatar: 'https://assets.example.com/avatars/user-1/member.png',
+        role: 'guide',
+        isGuide: true
+      },
+      guideProfile: { id: 'guide-profile-1', profilePhotoUrl: 'https://assets.example.com/avatars/user-1/guide.png' }
+    }
+  });
+
+  assert.equal(refreshed.auth.user.avatar, 'https://assets.example.com/avatars/user-1/member.png');
+  assert.equal(refreshed.auth.user.role, 'guide');
+  assert.equal(refreshed.guideProfile.profilePhotoUrl, 'https://assets.example.com/avatars/user-1/guide.png');
+  assert.equal(refreshed.toast, null);
 });
 
 test('set guide profile stores profile refreshed from database', () => {
@@ -188,13 +220,20 @@ test('mock payment creates booking and opens guide conversation', () => {
 test('guide registration submit makes user pending guide and stores profile', () => {
   let state = createInitialState();
   state = appReducer(state, signedInAction);
+  state = {
+    ...state,
+    auth: {
+      ...state.auth,
+      user: { ...state.auth.user, avatar: 'data:image/png;base64,member' }
+    }
+  };
   state = appReducer(state, {
     type: 'SUBMIT_GUIDE_APPLICATION',
     payload: { city: 'Seoul', nationality: 'Korea', intro: 'I love hidden alleys.', profilePhotoUrl: 'data:image/png;base64,abc' }
   });
 
   assert.equal(state.auth.user.role, 'pending-guide');
-  assert.equal(state.auth.user.avatar, 'data:image/png;base64,abc');
+  assert.equal(state.auth.user.avatar, 'data:image/png;base64,member');
   assert.equal(selectors.guideProfile(state).city, 'Seoul');
   assert.equal(selectors.guideProfile(state).profilePhotoUrl, 'data:image/png;base64,abc');
 });
@@ -249,9 +288,16 @@ test('publishing a tour removes the matching saved draft by payload id', () => {
   assert.deepEqual(state.drafts.map((draft) => draft.id), ['other-draft']);
 });
 
-test('guide profile update stores guide fields and syncs avatar', () => {
+test('guide profile update stores guide fields without replacing member avatar', () => {
   let state = createInitialState();
   state = appReducer(state, signedInAction);
+  state = {
+    ...state,
+    auth: {
+      ...state.auth,
+      user: { ...state.auth.user, avatar: 'data:image/png;base64,member' }
+    }
+  };
   state = appReducer(state, {
     type: 'SUBMIT_GUIDE_APPLICATION',
     payload: { city: 'Seoul', profilePhotoUrl: 'data:image/png;base64,old' }
@@ -270,7 +316,8 @@ test('guide profile update stores guide fields and syncs avatar', () => {
   assert.equal(selectors.guideProfile(state).city, 'Busan');
   assert.equal(selectors.guideProfile(state).years, '4');
   assert.deepEqual(selectors.guideProfile(state).additionalLanguages, ['한국어', '영어']);
-  assert.equal(state.auth.user.avatar, 'data:image/png;base64,new');
+  assert.equal(selectors.guideProfile(state).profilePhotoUrl, 'data:image/png;base64,new');
+  assert.equal(state.auth.user.avatar, 'data:image/png;base64,member');
 });
 
 test('registered guide roles hide the guide application shortcut', () => {
@@ -298,16 +345,6 @@ test('guide unavailable dates are merged and kept sorted without duplicates', ()
   });
 
   assert.deepEqual(state.guideUnavailableDates, ['2026-07-10', '2026-07-11', '2026-07-12']);
-});
-
-test('guide mode sections include the core guide operations', () => {
-  const labels = getGuideModeSections().map((section) => section.label);
-
-  assert.deepEqual(labels.slice(0, 6), ['My Tours', 'Create New Tour', 'Saved Drafts', 'Calendar & Availability', 'Booking Requests', 'Messages']);
-  assert.equal(labels.includes('Earnings'), true);
-  assert.equal(labels.includes('Payments & Payouts'), true);
-  assert.equal(labels.includes('Policy Center'), true);
-  assert.equal(labels.includes('Donation'), true);
 });
 
 test('guide mode overview summarizes active guide work', () => {

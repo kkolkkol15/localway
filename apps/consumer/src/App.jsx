@@ -9,7 +9,7 @@ import { fetchBookmarkIds } from './lib/customerApi.js';
 import { createBrowserSupabaseClient, getSupabaseConfig } from './lib/supabaseAuth.js';
 import {
   HomePage, SearchPage, TourDetailPage, PaymentPage, BookingSuccessPage, LoginPage,
-  GuideRegistrationPage, MyPage, GuideModePage, GuideMyToursPage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
+  GuideRegistrationPage, MyPage, GuideModePage, GuideMyToursPage, GuideTourDetailPage, GuidePaymentsPage, TourCreatePage, BookmarksPage,
   MessagesPage, PoliciesPage, SupportPage, MyBookingsPage, PastTripsPage,
   ReviewManagementPage, AccountSettingsPage, ViewProfilePage
 } from './pages/Pages.jsx';
@@ -70,6 +70,7 @@ export default function App() {
           <Route path="/mypage/profile" element={<ProtectedRoute><ViewProfilePage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode" element={<ProtectedRoute><GuideModePage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/tours" element={<ProtectedRoute guideOnly><GuideMyToursPage /></ProtectedRoute>} />
+          <Route path="/mypage/guide-mode/tours/:tourId" element={<ProtectedRoute guideOnly><GuideTourDetailPage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/payments" element={<ProtectedRoute><GuidePaymentsPage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/new" element={<ProtectedRoute guideOnly><TourCreatePage /></ProtectedRoute>} />
           <Route path="/mypage/guide-mode/tours/:tourId/edit" element={<ProtectedRoute guideOnly><TourCreatePage /></ProtectedRoute>} />
