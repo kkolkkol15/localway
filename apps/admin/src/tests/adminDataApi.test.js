@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   buildAdminConversationRow,
   buildAdminMemberMessageRequest,
@@ -737,6 +739,15 @@ test('reviewTourChangeRequest calls the admin review RPC', async () => {
       p_reason: ''
     }
   }]);
+});
+
+test('review_tour_change_request rejection restores the original tour to active', () => {
+  const migrationSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260712010000_restore_tour_on_change_rejection.sql'), 'utf8');
+  const rejectionBranch = migrationSql.match(/elsif p_decision = 'rejected' then([\s\S]*?)else/);
+
+  assert.ok(rejectionBranch, 'rejected decision branch should exist');
+  assert.match(rejectionBranch[1], /update public\.tours[\s\S]*set status = 'active'[\s\S]*where id = v_request\.tour_id;/);
+  assert.doesNotMatch(rejectionBranch[1], /update public\.tours[\s\S]*set status = 'rejected'[\s\S]*where id = v_request\.tour_id;/);
 });
 
 test('updateTourStatus patches an existing tour status', async () => {
