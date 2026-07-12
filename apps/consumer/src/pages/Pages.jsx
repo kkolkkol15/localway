@@ -2081,6 +2081,32 @@ export function GuideModePage() {
         <GuideOverviewMetric label="Blocked dates" value={guideOverview.unavailableDates} detail="Unavailable calendar days" />
         <GuideOverviewMetric label="Earnings" value={`$${guideOverview.estimatedEarnings}`} detail="Completed bookings" />
       </div>
+      <section className="guide-core-actions" aria-label="Guide management">
+        <Link className="guide-core-action-card" to="/mypage/guide-mode/tours">
+          <span className="guide-core-action-icon"><Package size={20} /></span>
+          <span>
+            <b>My Tours</b>
+            <small>Manage published tours and edits</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+        <Link className="guide-core-action-card" to="/mypage/guide-mode/new">
+          <span className="guide-core-action-icon"><Upload size={20} /></span>
+          <span>
+            <b>Create New Tour</b>
+            <small>Build a new local experience</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+        <Link className="guide-core-action-card" to="/mypage/settings?section=guide-profile&edit=1">
+          <span className="guide-core-action-icon"><UserRound size={20} /></span>
+          <span>
+            <b>Guide Profile</b>
+            <small>Update public guide information</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+      </section>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Panel title="Upcoming Bookings" items={state.bookings.map((b) => `${b.date} ${b.time}`)} />
         <GuideDraftsPanel drafts={tourDrafts} />
