@@ -309,6 +309,15 @@
     font-weight: 900;
   }
 
+  .tour-detail-gallery:has(.tour-detail-gallery-side > div:only-child) {
+    grid-template-columns: 1fr;
+  }
+
+  .tour-detail-gallery-side:has(> div:only-child),
+  .tour-detail-gallery-side > div:only-child {
+    display: none;
+  }
+
   .tour-detail-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
