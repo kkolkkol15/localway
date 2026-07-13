@@ -20,6 +20,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local tool state
+.superpowers/sdd/
+supabase/.temp/
+
 # OS and editor files
 .DS_Store
 Thumbs.db

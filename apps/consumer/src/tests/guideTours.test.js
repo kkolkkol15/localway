@@ -128,13 +128,29 @@ test('fetchGuideTours loads a guide tour list with pending change requests', asy
     from: (table) => ({
       select: (columns) => {
         calls.push(['select', table, columns]);
+        if (table === 'tours') {
+          return {
+            eq: (column, value) => {
+              calls.push(['eq', column, value]);
+              return {
+                order: async (columnName, options) => {
+                  calls.push(['order', table, columnName, options]);
+                  return { data: [{ id: 'tour-1', title: 'Market walk' }], error: null };
+                }
+              };
+            }
+          };
+        }
         return {
-          eq: (column, value) => {
-            calls.push(['eq', column, value]);
+          in: (column, values) => {
+            calls.push(['in', column, values]);
             return {
               order: async (columnName, options) => {
-                calls.push(['order', columnName, options]);
-                return { data: [{ id: 'tour-1', title: 'Market walk' }], error: null };
+                calls.push(['order', table, columnName, options]);
+                return {
+                  data: [{ id: 'request-1', tour_id: 'tour-1', status: 'pending', payload: { title: 'Updated walk' } }],
+                  error: null
+                };
               }
             };
           }
@@ -145,12 +161,50 @@ test('fetchGuideTours loads a guide tour list with pending change requests', asy
 
   const result = await fetchGuideTours(fakeClient, { guideProfileId: 'guide-1' });
 
-  assert.deepEqual(result, [{ id: 'tour-1', title: 'Market walk' }]);
+  assert.deepEqual(result, [{
+    id: 'tour-1',
+    title: 'Market walk',
+    tour_change_requests: [{ id: 'request-1', tour_id: 'tour-1', status: 'pending', payload: { title: 'Updated walk' } }]
+  }]);
   assert.deepEqual(calls, [
-    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),bookmarks(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)'],
+    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),bookmarks(id)'],
     ['eq', 'guide_id', 'guide-1'],
-    ['order', 'created_at', { ascending: false }]
+    ['order', 'tours', 'created_at', { ascending: false }],
+    ['select', 'tour_change_requests', 'id,tour_id,status,payload,created_at,reviewed_at,rejection_reason'],
+    ['in', 'tour_id', ['tour-1']],
+    ['order', 'tour_change_requests', 'created_at', { ascending: false }]
   ]);
+});
+
+test('fetchGuideTours keeps showing tours when change request lookup fails', async () => {
+  const fakeClient = {
+    from: (table) => ({
+      select: () => {
+        if (table === 'tours') {
+          return {
+            eq: () => ({
+              order: async () => ({
+                data: [{ id: 'tour-1', title: 'Market walk' }],
+                error: null
+              })
+            })
+          };
+        }
+        return {
+          in: () => ({
+            order: async () => ({
+              data: null,
+              error: new Error('Could not find a relationship between tours and tour_change_requests in the schema cache')
+            })
+          })
+        };
+      }
+    })
+  };
+
+  const result = await fetchGuideTours(fakeClient, { guideProfileId: 'guide-1' });
+
+  assert.deepEqual(result, [{ id: 'tour-1', title: 'Market walk', tour_change_requests: [] }]);
 });
 
 test('getGuideTourStatusLabel maps active tours to approved for guide UI', () => {
