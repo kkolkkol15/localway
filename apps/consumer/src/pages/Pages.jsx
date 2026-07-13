@@ -564,14 +564,19 @@ export function TourDetailPage() {
   const sideImages = gallery.slice(1, 5);
   const itinerary = buildTourItinerarySteps(tour);
   const reviewLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `★ ${tour.rating} · 후기 ${tour.reviews}` : '신규 투어';
+  const tourIntro = tour.description || tour.detailText || '가이드가 준비한 투어 소개가 곧 업데이트됩니다.';
+  const hasDetailedContent = Boolean(sanitizeTourContentHtml(tour.contentHtml));
+  const paymentTypeLabel = paymentTypeLabels[tour.paymentType] || '결제 방식';
 
   return (
     <main className="tour-detail-page">
       <header className="tour-detail-header">
         <div>
-          <p>{tour.city} · {tour.type}</p>
+          <p className="tour-detail-eyebrow">{[tour.city, tour.type].filter(Boolean).join(' · ') || '투어 상세'}</p>
           <h1>{tour.title}</h1>
+          <p className="tour-detail-summary">{tourIntro}</p>
           <div className="tour-detail-submeta">
+            <span>{tour.priceLabel}</span>
             <span>{reviewLabel}</span>
             <span>{tour.durationLabel}</span>
             <span>{tour.maxPeopleLabel}</span>
@@ -597,12 +602,30 @@ export function TourDetailPage() {
             <div>
               <h2>{tour.guide.name} 가이드가 진행합니다</h2>
               <p>{tour.guide.city || tour.city} · {(tour.guide.languages ?? []).join(', ') || '언어 정보 미입력'}</p>
+              <small>{tour.guide.intro || `${tour.city}에서 현지 경험을 안내하는 로컬 가이드입니다.`}</small>
             </div>
           </article>
 
           <section className="tour-detail-section">
             <h2>투어 소개</h2>
-            <RichTourContent html={tour.contentHtml} fallback={tour.detailText || tour.description} />
+            <p className="tour-detail-intro-copy">{tourIntro}</p>
+          </section>
+
+          {hasDetailedContent ? (
+            <section className="tour-detail-section">
+              <h2>상세 콘텐츠</h2>
+              <RichTourContent html={tour.contentHtml} fallback={tour.detailText || tour.description} />
+            </section>
+          ) : null}
+
+          <section className="tour-detail-section">
+            <h2>핵심 정보</h2>
+            <div className="tour-detail-facts">
+              <article><DollarSign size={20} /><b>{tour.priceLabel}</b><span>{paymentTypeLabel}</span></article>
+              <article><CalendarDays size={20} /><b>{tour.durationLabel}</b><span>예상 소요 시간</span></article>
+              <article><UserRound size={20} /><b>{tour.maxPeopleLabel}</b><span>참여 가능 인원</span></article>
+              <article><Globe2 size={20} /><b>{tour.city || '도시 미입력'}</b><span>진행 도시</span></article>
+            </div>
           </section>
 
           <section className="tour-detail-section">
@@ -620,12 +643,6 @@ export function TourDetailPage() {
             </ol>
           </section>
 
-          <section className="tour-detail-facts">
-            <article><CalendarDays size={20} /><b>{tour.durationLabel}</b><span>예상 소요 시간</span></article>
-            <article><UserRound size={20} /><b>{tour.maxPeopleLabel}</b><span>참여 가능 인원</span></article>
-            <article><Globe2 size={20} /><b>{tour.city}</b><span>진행 도시</span></article>
-          </section>
-
           <section className="tour-detail-section">
             <h2>포함 정보</h2>
             <div className="tour-detail-chip-row">
@@ -640,15 +657,6 @@ export function TourDetailPage() {
             </div>
           </section>
 
-          <section className="tour-detail-guide-panel">
-            <ProfileAvatar src={tour.guide.avatar} className="h-20 w-20 text-primary" />
-            <div>
-              <h2>{tour.guide.name}</h2>
-              <p>{tour.guide.intro || `${tour.city}에서 현지 경험을 안내하는 로컬 가이드입니다.`}</p>
-              <small>{tour.guide.years ? `${tour.guide.years}년 거주` : '거주 기간 미입력'} · {(tour.guide.languages ?? []).join(', ') || '언어 정보 미입력'}</small>
-            </div>
-          </section>
-
           <Reviews tour={tour} />
         </section>
 
@@ -658,7 +666,8 @@ export function TourDetailPage() {
             <span> / 1인</span>
           </div>
           <dl>
-            <div><dt>도시</dt><dd>{tour.city}</dd></div>
+            <div><dt>결제</dt><dd>{paymentTypeLabel}</dd></div>
+            <div><dt>도시</dt><dd>{tour.city || '도시 미입력'}</dd></div>
             <div><dt>시간</dt><dd>{tour.durationLabel}</dd></div>
             <div><dt>인원</dt><dd>{tour.maxPeopleLabel}</dd></div>
           </dl>

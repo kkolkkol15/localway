@@ -75,26 +75,28 @@ export function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseU
 }
 
 export function buildTourItinerarySteps(tour = {}) {
-  const city = tour.city || 'the city';
-  const detailSentences = compactText(tour.detailText || tour.description)
+  const city = compactText(tour.city) || '진행 지역';
+  const detailSource = tour.detailText || htmlToText(tour.contentHtml) || tour.description;
+  const detailSentences = compactText(detailSource)
     .split(/(?<=[.!?。！？])\s+/)
     .map(compactText)
     .filter(Boolean);
-  const flow = detailSentences.slice(0, 2).join(' ') || 'Meet your guide and explore the local highlights selected for this tour.';
-  const transport = (tour.transportLabels ?? []).length ? ` Main transport: ${tour.transportLabels.join(', ')}.` : '';
-  const duration = tour.durationLabel && tour.durationLabel !== '시간 미정' ? ` Planned duration: ${tour.durationLabel}.` : '';
+  const flow = detailSentences.slice(0, 2).join(' ') || '가이드가 준비한 동선에 따라 현지의 분위기와 주요 경험을 차례로 둘러봅니다.';
+  const transportLabels = Array.isArray(tour.transportLabels) ? tour.transportLabels.map(compactText).filter(Boolean) : [];
+  const transport = transportLabels.length ? ` 주요 이동수단은 ${transportLabels.join(', ')}입니다.` : '';
+  const duration = tour.durationLabel && tour.durationLabel !== '시간 미정' ? ` 전체 소요 시간은 ${tour.durationLabel}입니다.` : '';
   return [
     {
-      title: `Meet in ${city}`,
-      description: `Start with your local guide in ${city} and confirm the route before the experience begins.`
+      title: '만남과 오리엔테이션',
+      description: `${city}에서 가이드와 만나 일정, 이동 방식, 주의사항을 먼저 확인합니다.`
     },
     {
-      title: 'Experience flow',
+      title: '투어 진행',
       description: `${flow}${transport}`.trim()
     },
     {
-      title: 'Wrap up',
-      description: `Finish with final local tips and time for questions.${duration}`.trim()
+      title: '마무리 안내',
+      description: `마지막에는 현지 팁과 추가 질문을 나누며 일정을 정리합니다.${duration}`.trim()
     }
   ];
 }

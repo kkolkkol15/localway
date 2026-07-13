@@ -204,10 +204,12 @@
     margin-bottom: 18px;
   }
 
-  .tour-detail-header p {
+  .tour-detail-eyebrow {
+    margin: 0;
     color: #71717a;
     font-size: 14px;
     font-weight: 800;
+    overflow-wrap: anywhere;
   }
 
   .tour-detail-header h1 {
@@ -217,6 +219,16 @@
     font-weight: 950;
     line-height: 1.06;
     letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .tour-detail-summary {
+    max-width: 780px;
+    margin: 12px 0 0;
+    color: #52525b;
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.7;
     overflow-wrap: anywhere;
   }
 
@@ -239,6 +251,8 @@
     color: #3f3f46;
     font-size: 13px;
     font-weight: 850;
+    overflow-wrap: anywhere;
+    text-align: center;
   }
 
   .tour-detail-save,
@@ -339,6 +353,22 @@
     color: #52525b;
     line-height: 1.75;
     overflow-wrap: anywhere;
+  }
+
+  .tour-detail-host-card small {
+    display: block;
+    margin-top: 8px;
+    color: #71717a;
+    font-size: 13px;
+    font-weight: 750;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .tour-detail-intro-copy {
+    max-width: 760px;
+    font-size: 17px;
+    font-weight: 650;
   }
 
   .tour-detail-section {
@@ -497,8 +527,9 @@
 
   .tour-detail-facts {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
+    margin-top: 16px;
   }
 
   .tour-detail-facts article {
@@ -513,6 +544,7 @@
 
   .tour-detail-facts b {
     overflow-wrap: anywhere;
+    line-height: 1.3;
     font-weight: 950;
   }
 
@@ -521,6 +553,7 @@
     color: #71717a;
     font-size: 13px;
     font-weight: 750;
+    line-height: 1.4;
   }
 
   .tour-detail-chip-row {
@@ -528,6 +561,11 @@
     flex-wrap: wrap;
     gap: 10px;
     margin-top: 14px;
+  }
+
+  .tour-detail-chip-row span {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .tour-detail-apply-card {
@@ -543,8 +581,12 @@
   }
 
   .tour-detail-apply-card strong {
+    display: inline-block;
+    max-width: 100%;
     font-size: 25px;
     font-weight: 950;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .tour-detail-apply-card > div span {

@@ -307,7 +307,7 @@ test('mapTourRecord falls back cleanly when a tour has no reviews', () => {
   assert.deepEqual(tour.reviewsList, []);
 });
 
-test('buildTourItinerarySteps creates course steps from existing tour data', () => {
+test('buildTourItinerarySteps creates Korean course steps from existing tour data', () => {
   const steps = buildTourItinerarySteps({
     city: 'Seoul',
     durationLabel: '2시간',
@@ -315,9 +315,20 @@ test('buildTourItinerarySteps creates course steps from existing tour data', () 
     detailText: 'Meet at the station. Explore the market. Finish at a tea house.'
   });
 
-  assert.deepEqual(steps.map((step) => step.title), ['Meet in Seoul', 'Experience flow', 'Wrap up']);
+  assert.deepEqual(steps.map((step) => step.title), ['만남과 오리엔테이션', '투어 진행', '마무리 안내']);
+  assert.match(steps[0].description, /Seoul/);
   assert.match(steps[1].description, /Explore the market/);
+  assert.match(steps[1].description, /Walking/);
   assert.match(steps[2].description, /2시간/);
+});
+
+test('buildTourItinerarySteps falls back without English placeholders when tour data is sparse', () => {
+  const steps = buildTourItinerarySteps({});
+
+  assert.deepEqual(steps.map((step) => step.title), ['만남과 오리엔테이션', '투어 진행', '마무리 안내']);
+  assert.ok(steps.every((step) => !/[A-Za-z]{4,}/.test(step.title)));
+  assert.ok(steps.every((step) => !/Meet|Experience|Wrap|guide|tour/i.test(step.description)));
+  assert.match(steps[1].description, /가이드가 준비한 동선/);
 });
 
 test('fetchTourById requests active tour detail data without mock fallback', async () => {
