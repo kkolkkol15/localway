@@ -165,7 +165,7 @@ export async function fetchGuideTours(client, { guideProfileId }) {
   if (!guideProfileId) throw new Error('A guide profile id is required to load guide tours.');
   const { data, error } = await client
     .from('tours')
-    .select('*,tour_images(image_path,sort_order),reservations(id),bookmarks(id)')
+    .select('*,tour_images(image_path,sort_order),reservations(id),bookmarks(tour_id)')
     .eq('guide_id', guideProfileId)
     .order('created_at', { ascending: false });
 

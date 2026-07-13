@@ -167,7 +167,7 @@ test('fetchGuideTours loads a guide tour list with pending change requests', asy
     tour_change_requests: [{ id: 'request-1', tour_id: 'tour-1', status: 'pending', payload: { title: 'Updated walk' } }]
   }]);
   assert.deepEqual(calls, [
-    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),bookmarks(id)'],
+    ['select', 'tours', '*,tour_images(image_path,sort_order),reservations(id),bookmarks(tour_id)'],
     ['eq', 'guide_id', 'guide-1'],
     ['order', 'tours', 'created_at', { ascending: false }],
     ['select', 'tour_change_requests', 'id,tour_id,status,payload,created_at,reviewed_at,rejection_reason'],
@@ -243,7 +243,7 @@ test('mapGuideTourListItem prepares thumbnail, counts, dates, and fallback value
       { image_path: 'first.png', sort_order: 1 }
     ],
     reservations: [{ id: 'reservation-1' }],
-    bookmarks: [{ id: 'bookmark-1' }, { id: 'bookmark-2' }]
+    bookmarks: [{ tour_id: 'tour-1' }, { tour_id: 'tour-1' }]
   });
 
   assert.equal(mapped.thumbnail, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/first.png');
