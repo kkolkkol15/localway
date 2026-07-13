@@ -52,6 +52,11 @@ function StatusBadge({ value }) {
   return <span className={badgeClass(value)}>{statusLabel(value)}</span>;
 }
 
+function TourThumbnail({ row }) {
+  if (!row?.thumbnail) return <span className="thumb empty">이미지 없음</span>;
+  return <img className="thumb" src={row.thumbnail} alt={row.title || '투어 대표 사진'} />;
+}
+
 function ActionButton({ icon: Icon, children, onClick, tone = 'ghost' }) {
   return <button className={`${tone}-button compact`} type="button" onClick={(event) => { event.stopPropagation(); onClick?.(); }}><Icon size={16} />{children}</button>;
 }
@@ -567,7 +572,7 @@ export function TourManagement() {
   return (
     <>
       <DataTable rows={rows} searchPlaceholder="투어, 도시, 가이드 검색" filters={<select value={city} onChange={(event) => setCity(event.target.value)}>{['전체', '서울', '부산', '제주', '문화', '미식', '자연', 'active', 'pending', 'paused', 'rejected'].map((item) => <option key={item}>{item}</option>)}</select>} columns={[
-        { key: 'thumbnail', label: '썸네일', render: (row) => <img className="thumb" src={row.thumbnail} alt="" /> }, { key: 'title', label: '제목', sortable: true }, { key: 'guide', label: '가이드', sortable: true }, { key: 'city', label: '도시', sortable: true },
+        { key: 'thumbnail', label: '썸네일', render: (row) => <TourThumbnail row={row} /> }, { key: 'title', label: '제목', sortable: true }, { key: 'guide', label: '가이드', sortable: true }, { key: 'city', label: '도시', sortable: true },
         { key: 'createdAt', label: '등록일', sortable: true }, { key: 'bookings', label: '예약 건수', sortable: true }, { key: 'status', label: '상태', render: (row) => <StatusBadge value={row.status} /> },
         { key: 'actions', label: '관리', render: renderTourActions }
       ]} />
