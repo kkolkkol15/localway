@@ -219,12 +219,17 @@ export function mapTourRecord(record = {}) {
   const descriptionText = preserveLineBreakText(record.description);
   const detailText = htmlToText(record.content_html) || compactText(descriptionText) || '';
   const price = Number(record.price_amount ?? 0);
-  const reviewsList = (record.reviews ?? [])
-    .filter((review) => !review.status || review.status === 'visible')
+  const visibleReviewRows = (record.reviews ?? [])
+    .filter((review) => !review.status || review.status === 'visible');
+  const reviewsList = visibleReviewRows
+    .filter((review) => compactText(review.content))
     .map(mapReviewRecord)
     .filter((review) => review.content);
-  const reviewTotal = reviewsList.reduce((total, review) => total + review.rating, 0);
-  const reviewAverage = reviewsList.length ? Number((reviewTotal / reviewsList.length).toFixed(1)) : 0;
+  const reviewRatings = visibleReviewRows
+    .map((review) => Number(review.rating ?? 0))
+    .filter((rating) => Number.isFinite(rating) && rating > 0);
+  const reviewTotal = reviewRatings.reduce((total, rating) => total + rating, 0);
+  const reviewAverage = reviewRatings.length ? Number((reviewTotal / reviewRatings.length).toFixed(1)) : 0;
   return {
     id: record.id,
     title: record.title,
@@ -252,7 +257,7 @@ export function mapTourRecord(record = {}) {
     transportLabels,
     guide,
     rating: reviewAverage,
-    reviews: reviewsList.length,
+    reviews: reviewRatings.length,
     reviewsList
   };
 }
@@ -396,7 +401,7 @@ export function mapConversationRecord(record = {}, currentUserId = '') {
 export async function fetchActiveTours(client, { city = '', filters = {} } = {}) {
   let query = client
     .from('tours')
-    .select('*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))')
+    .select('id,title,city,type,description,price_amount,currency,payment_type,duration_minutes,max_people,status,created_at,options,guide_profiles!inner(id,display_name,city,languages,intro,residence_years,status,profiles(avatar_path)),tour_images(id,image_path,sort_order),reviews(id,rating,status)')
     .eq('status', 'active')
     .eq('guide_profiles.status', 'active');
   if (city) query = query.ilike('city', city);

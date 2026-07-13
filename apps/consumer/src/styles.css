@@ -3967,6 +3967,10 @@
       flex-basis: min(82vw, 320px);
     }
 
+    .popular-carousel-track {
+      animation-duration: 72s;
+    }
+
     .tour-detail-page {
       width: min(100% - 24px, 1120px);
       padding-top: 22px;
