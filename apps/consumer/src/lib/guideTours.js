@@ -165,12 +165,35 @@ export async function fetchGuideTours(client, { guideProfileId }) {
   if (!guideProfileId) throw new Error('A guide profile id is required to load guide tours.');
   const { data, error } = await client
     .from('tours')
-    .select('*,tour_images(image_path,sort_order),reservations(id),bookmarks(id),tour_change_requests(id,status,payload,created_at,reviewed_at,rejection_reason)')
+    .select('*,tour_images(image_path,sort_order),reservations(id),bookmarks(id)')
     .eq('guide_id', guideProfileId)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  const tours = data ?? [];
+  const tourIds = tours.map((tour) => tour.id).filter(Boolean);
+  if (!tourIds.length) return tours;
+
+  const { data: changeRequests, error: requestError } = await client
+    .from('tour_change_requests')
+    .select('id,tour_id,status,payload,created_at,reviewed_at,rejection_reason')
+    .in('tour_id', tourIds)
+    .order('created_at', { ascending: false });
+
+  if (requestError) {
+    return tours.map((tour) => ({ ...tour, tour_change_requests: [] }));
+  }
+
+  const requestsByTourId = (changeRequests ?? []).reduce((groups, request) => {
+    const tourId = request?.tour_id;
+    if (!tourId) return groups;
+    return { ...groups, [tourId]: [...(groups[tourId] ?? []), request] };
+  }, {});
+
+  return tours.map((tour) => ({
+    ...tour,
+    tour_change_requests: requestsByTourId[tour.id] ?? []
+  }));
 }
 
 export async function submitTourChangeRequest(client, { tourId, payload }) {
