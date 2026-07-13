@@ -25,6 +25,10 @@ function compactText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function preserveLineBreakText(value = '') {
+  return String(value || '').replace(/\r\n?/g, '\n').trim();
+}
+
 function htmlToText(value = '') {
   return compactText(String(value || '').replace(/<[^>]*>/g, ' '));
 }
@@ -72,33 +76,6 @@ export function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseU
   if (!path || isRenderableImageUrl(path)) return path;
   const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
   return `${String(supabaseUrl).replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
-}
-
-export function buildTourItinerarySteps(tour = {}) {
-  const city = compactText(tour.city) || '진행 지역';
-  const detailSource = tour.detailText || htmlToText(tour.contentHtml) || tour.description;
-  const detailSentences = compactText(detailSource)
-    .split(/(?<=[.!?。！？])\s+/)
-    .map(compactText)
-    .filter(Boolean);
-  const flow = detailSentences.slice(0, 2).join(' ') || '가이드가 준비한 동선에 따라 현지의 분위기와 주요 경험을 차례로 둘러봅니다.';
-  const transportLabels = Array.isArray(tour.transportLabels) ? tour.transportLabels.map(compactText).filter(Boolean) : [];
-  const transport = transportLabels.length ? ` 주요 이동수단은 ${transportLabels.join(', ')}입니다.` : '';
-  const duration = tour.durationLabel && tour.durationLabel !== '시간 미정' ? ` 전체 소요 시간은 ${tour.durationLabel}입니다.` : '';
-  return [
-    {
-      title: '만남과 오리엔테이션',
-      description: `${city}에서 가이드와 만나 일정, 이동 방식, 주의사항을 먼저 확인합니다.`
-    },
-    {
-      title: '투어 진행',
-      description: `${flow}${transport}`.trim()
-    },
-    {
-      title: '마무리 안내',
-      description: `마지막에는 현지 팁과 추가 질문을 나누며 일정을 정리합니다.${duration}`.trim()
-    }
-  ];
 }
 
 export function getPaginatedSearchResults(results = [], visibleCount = 12) {
@@ -239,7 +216,8 @@ export function mapTourRecord(record = {}) {
   const maxPeople = Number(record.max_people ?? 1);
   const optionLabels = normalizeList(record.options);
   const transportLabels = normalizeList(record.transport);
-  const detailText = htmlToText(record.content_html) || compactText(record.description) || '';
+  const descriptionText = preserveLineBreakText(record.description);
+  const detailText = htmlToText(record.content_html) || compactText(descriptionText) || '';
   const price = Number(record.price_amount ?? 0);
   const reviewsList = (record.reviews ?? [])
     .filter((review) => !review.status || review.status === 'visible')
@@ -252,7 +230,8 @@ export function mapTourRecord(record = {}) {
     title: record.title,
     city: record.city,
     type: record.type,
-    description: compactText(record.description),
+    description: compactText(descriptionText),
+    descriptionText,
     contentHtml: record.content_html || '',
     detailText,
     price,

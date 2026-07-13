@@ -13,7 +13,7 @@ import { getGuideModeOverview } from '../lib/guideMode.js';
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
 import { buildTourFormPayloadFromTour, fetchGuideTours, filterGuideToursByStatus, guideTourStatusFilters, mapGuideTourListItem, publishGuideTour, submitTourChangeRequest, uploadTourMainPhoto } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
-import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
+import { buildHomepageTourSections, buildTourDetailPath, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, fetchOwnedGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, resolveGuideProfileImageUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
 import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, selectAllowedRichContentImageFiles, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
@@ -486,10 +486,62 @@ function CheckGroup({ title, items, selected, onToggle, chip, labelFor = (item) 
   return <section className="rounded-card border bg-white p-4"><h3 className="font-black">{title}</h3><div className={`mt-3 flex flex-wrap gap-2 ${chip ? '' : 'grid sm:grid-cols-2'}`}>{items.map((item) => <button type="button" className={`min-h-11 rounded-full border px-4 font-bold ${selected.includes(item) ? 'border-primary bg-orange-50 text-primary' : 'bg-white'}`} key={item} onClick={() => onToggle(item)}>{labelFor(item)}</button>)}</div></section>;
 }
 
-function RichTourContent({ html, fallback }) {
+function ExpandableTourText({ children, className = '', label = '내용' }) {
+  const contentRef = useRef(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [collapsedHeight, setCollapsedHeight] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const content = contentRef.current;
+      if (!content) return;
+      const style = window.getComputedStyle(content);
+      const lineHeight = Number.parseFloat(style.lineHeight) || 24;
+      const lines = Number.parseFloat(style.getPropertyValue('--tour-expandable-lines')) || 9;
+      const nextCollapsedHeight = Math.ceil(lineHeight * lines);
+      const nextContentHeight = Math.ceil(content.scrollHeight);
+      setCollapsedHeight(nextCollapsedHeight);
+      setContentHeight(nextContentHeight);
+      setOverflowing(nextContentHeight > nextCollapsedHeight + 1);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [children]);
+
+  const expandableStyle = {
+    '--tour-expandable-collapsed-height': `${collapsedHeight}px`,
+    '--tour-expandable-expanded-height': `${contentHeight}px`
+  };
+  const wrapperClassName = ['tour-expandable', className, expanded ? 'is-expanded' : '', overflowing ? 'is-collapsible' : ''].filter(Boolean).join(' ');
+
+  return (
+    <div className={wrapperClassName} style={expandableStyle}>
+      <div className="tour-expandable-content" ref={contentRef}>{children}</div>
+      {overflowing ? (
+        <button type="button" className="tour-expandable-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+          {expanded ? '접기' : '더보기'}
+          <span className="sr-only"> {label}</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RichTourContent({ html, fallback, expandable = false }) {
   const safeHtml = sanitizeTourContentHtml(html);
-  if (safeHtml) return <div className="tour-rich-content" dangerouslySetInnerHTML={{ __html: safeHtml }} />;
-  return <p>{fallback || '투어 설명이 아직 등록되지 않았습니다.'}</p>;
+  const content = safeHtml ? <div className="tour-rich-content" dangerouslySetInnerHTML={{ __html: safeHtml }} /> : <p>{fallback || '투어 설명이 아직 등록되지 않았습니다.'}</p>;
+  if (expandable) return <ExpandableTourText label="상세 콘텐츠">{content}</ExpandableTourText>;
+  return content;
+}
+
+function getTourContentImageSources(html = '') {
+  const safeHtml = sanitizeTourContentHtml(html);
+  if (!safeHtml) return [];
+  return [...new Set([...safeHtml.matchAll(/<img\b[^>]*\bsrc=(["'])(.*?)\1/gi)].map((match) => match[2]).filter(Boolean))];
 }
 
 export function TourDetailPage() {
@@ -501,6 +553,7 @@ export function TourDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [applyNotice, setApplyNotice] = useState('');
+  const [activeGalleryImage, setActiveGalleryImage] = useState('');
   const tour = remoteTour;
   const saved = tour ? bookmarkedTourIds.includes(tour.id) : false;
 
@@ -562,9 +615,10 @@ export function TourDetailPage() {
   const gallery = tour.gallery.length ? tour.gallery : [];
   const heroImage = gallery[0] || tour.image || tour.thumbnail || '';
   const sideImages = gallery.slice(1, 5);
-  const itinerary = buildTourItinerarySteps(tour);
+  const contentImages = getTourContentImageSources(tour.contentHtml);
+  const detailGalleryImages = [...new Set([...sideImages, ...contentImages])].filter((src) => src && src !== heroImage);
   const reviewLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `★ ${tour.rating} · 후기 ${tour.reviews}` : '신규 투어';
-  const tourIntro = tour.description || tour.detailText || '가이드가 준비한 투어 소개가 곧 업데이트됩니다.';
+  const tourIntro = tour.descriptionText || tour.description || tour.detailText || '가이드가 준비한 투어 소개가 곧 업데이트됩니다.';
   const hasDetailedContent = Boolean(sanitizeTourContentHtml(tour.contentHtml));
   const paymentTypeLabel = paymentTypeLabels[tour.paymentType] || '결제 방식';
 
@@ -574,7 +628,6 @@ export function TourDetailPage() {
         <div>
           <p className="tour-detail-eyebrow">{[tour.city, tour.type].filter(Boolean).join(' · ') || '투어 상세'}</p>
           <h1>{tour.title}</h1>
-          <p className="tour-detail-summary">{tourIntro}</p>
           <div className="tour-detail-submeta">
             <span>{tour.priceLabel}</span>
             <span>{reviewLabel}</span>
@@ -584,7 +637,7 @@ export function TourDetailPage() {
         </div>
         <button className="tour-detail-save" type="button" onClick={toggleSavedTour}>
           <Heart className={saved ? 'fill-primary text-primary' : ''} size={19} />
-          {saved ? '저장됨' : '저장'}
+          {saved ? '북마크됨' : '북마크'}
         </button>
       </header>
 
@@ -594,6 +647,9 @@ export function TourDetailPage() {
           {sideImages.length ? sideImages.map((src) => <img src={src} alt="" key={src} />) : <div>추가 이미지 없음</div>}
         </div>
       </section>
+      <ExpandableTourText className="tour-detail-summary" label="투어 소개글">
+        <p>{tourIntro}</p>
+      </ExpandableTourText>
 
       <div className="tour-detail-layout">
         <section className="tour-detail-content">
@@ -606,15 +662,23 @@ export function TourDetailPage() {
             </div>
           </article>
 
-          <section className="tour-detail-section">
-            <h2>투어 소개</h2>
-            <p className="tour-detail-intro-copy">{tourIntro}</p>
-          </section>
+          {detailGalleryImages.length ? (
+            <section className="tour-detail-section">
+              <h2>설명 사진</h2>
+              <div className="tour-detail-photo-grid">
+                {detailGalleryImages.map((src, index) => (
+                  <button type="button" key={src} onClick={() => setActiveGalleryImage(src)} aria-label={`설명 사진 ${index + 1} 크게 보기`}>
+                    <img src={src} alt="" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {hasDetailedContent ? (
             <section className="tour-detail-section">
               <h2>상세 콘텐츠</h2>
-              <RichTourContent html={tour.contentHtml} fallback={tour.detailText || tour.description} />
+              <RichTourContent html={tour.contentHtml} fallback={tour.detailText || tour.description} expandable />
             </section>
           ) : null}
 
@@ -626,21 +690,6 @@ export function TourDetailPage() {
               <article><UserRound size={20} /><b>{tour.maxPeopleLabel}</b><span>참여 가능 인원</span></article>
               <article><Globe2 size={20} /><b>{tour.city || '도시 미입력'}</b><span>진행 도시</span></article>
             </div>
-          </section>
-
-          <section className="tour-detail-section">
-            <h2>진행 일정</h2>
-            <ol className="tour-detail-itinerary">
-              {itinerary.map((step, index) => (
-                <li key={step.title}>
-                  <span>{index + 1}</span>
-                  <div>
-                    <h3>{step.title}</h3>
-                    <p>{step.description}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
           </section>
 
           <section className="tour-detail-section">
@@ -676,6 +725,12 @@ export function TourDetailPage() {
           <button className="tour-detail-share" type="button" onClick={() => navigator.share?.({ title: tour.title, url: location.href })}><Share2 size={17} /> 공유하기</button>
         </aside>
       </div>
+      {activeGalleryImage ? (
+        <div className="tour-detail-lightbox" role="dialog" aria-modal="true" onClick={() => setActiveGalleryImage('')}>
+          <button type="button" aria-label="이미지 닫기" onClick={() => setActiveGalleryImage('')}>×</button>
+          <img src={activeGalleryImage} alt="" onClick={(event) => event.stopPropagation()} />
+        </div>
+      ) : null}
     </main>
   );
 }
