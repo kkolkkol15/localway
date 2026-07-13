@@ -19,6 +19,32 @@ export function buildTourRow(payload, { guideProfileId, fallbackCity = '' }) {
   };
 }
 
+function requireMainImagePath(value = '') {
+  const path = String(value || '').trim();
+  if (!path) throw new Error('A main photo is required to publish a tour.');
+  return path;
+}
+
+function cleanStorageFileName(name = 'main-photo') {
+  return String(name || 'main-photo')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'main-photo';
+}
+
+export function createTourMainPhotoStoragePath({ userId, fileName, now = Date.now() }) {
+  if (!userId) throw new Error('A user id is required to upload a main tour photo.');
+  return `${userId}/main-photo/main-${now}-${cleanStorageFileName(fileName)}`;
+}
+
+export async function uploadTourMainPhoto(client, userId, file) {
+  if (!file?.size) throw new Error('A main tour photo file is required.');
+  const path = createTourMainPhotoStoragePath({ userId, fileName: file.name });
+  const { error } = await client.storage.from('tour-images').upload(path, file, { upsert: true });
+  if (error) throw error;
+  const publicUrl = client.storage.from('tour-images').getPublicUrl(path)?.data?.publicUrl || resolvePublicStorageUrl('tour-images', path);
+  return { path, url: publicUrl };
+}
+
 export function getGuideTourStatusFilter(status = '') {
   if (status === 'active' || status === 'approved') return 'approved';
   if (status === 'pending') return 'pending';
@@ -108,6 +134,7 @@ export function buildEditableTourPayload(payload = {}, { fallbackCity = '' } = {
     payment_type: paymentType,
     duration_minutes: Number(payload.durationMinutes || 60),
     max_people: Number(payload.maxPeople || 1),
+    main_image_path: requireMainImagePath(payload.mainImagePath || payload.main_image_path),
     options: readOptionPayload(payload)
   };
 }
@@ -122,6 +149,8 @@ export function buildTourChangeRequestRow({ tourId, payload }) {
 
 export function buildTourFormPayloadFromTour(tour = {}) {
   const paymentType = tour.payment_type || 'pay_as_you_go';
+  const images = [...(tour.tour_images ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const mainImagePath = images[0]?.image_path || '';
   const base = {
     id: `edit-${tour.id}`,
     sourceTourId: tour.id,
@@ -136,7 +165,9 @@ export function buildTourFormPayloadFromTour(tour = {}) {
     packagePrice: paymentType === 'package' ? String(tour.price_amount ?? '') : '',
     currency: tour.currency || 'USD',
     durationMinutes: String(tour.duration_minutes ?? ''),
-    maxPeople: String(tour.max_people ?? '')
+    maxPeople: String(tour.max_people ?? ''),
+    mainImagePath,
+    mainImagePreview: mainImagePath ? resolvePublicStorageUrl('tour-images', mainImagePath) : ''
   };
   const options = tour.options && typeof tour.options === 'object' ? tour.options : {};
   return Object.entries(options).reduce((payload, [key, value]) => {
@@ -151,13 +182,22 @@ export function buildTourFormPayloadFromTour(tour = {}) {
 
 export async function publishGuideTour(client, { payload, guideProfileId, fallbackCity }) {
   const row = buildTourRow(payload, { guideProfileId, fallbackCity });
+  const { main_image_path: mainImagePath, ...tourRow } = row;
   const { data, error } = await client
     .from('tours')
-    .insert(row)
+    .insert(tourRow)
     .select()
     .single();
 
   if (error) throw error;
+  const { error: imageError } = await client
+    .from('tour_images')
+    .insert({
+      tour_id: data.id,
+      image_path: mainImagePath,
+      sort_order: 0
+    });
+  if (imageError) throw imageError;
   return data;
 }
 

@@ -15,6 +15,25 @@ function compactText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function isRenderableImageUrl(value = '') {
+  return /^(https?:|data:|blob:)/i.test(String(value));
+}
+
+function encodeStoragePath(path = '') {
+  return String(path)
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+}
+
+function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseUrl = 'https://qrabzkcibqaslealvdar.supabase.co') {
+  const path = String(storagePath || '').trim();
+  if (!path || isRenderableImageUrl(path)) return path;
+  const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
+  return `${String(supabaseUrl).replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
+}
+
 function decodeHtmlEntities(value) {
   return String(value ?? '')
     .replace(/&nbsp;/gi, ' ')
@@ -199,6 +218,7 @@ function buildActivitySummary(profile = {}) {
 }
 
 function mapRequestedTourPayload(payload = {}) {
+  const mainImagePath = payload.main_image_path || '';
   return {
     title: payload.title || '',
     city: payload.city || '',
@@ -215,6 +235,8 @@ function mapRequestedTourPayload(payload = {}) {
     durationLabel: formatDuration(payload.duration_minutes),
     maxPeople: payload.max_people ?? null,
     maxPeopleLabel: formatPeople(payload.max_people),
+    mainImagePath,
+    mainImageUrl: resolvePublicStorageImageUrl('tour-images', mainImagePath),
     optionLabels: normalizeList(payload.options),
     transportLabels: normalizeList(payload.transport)
   };
@@ -353,8 +375,9 @@ export function mapTourToAdminRow(tour = {}) {
     guide: tour.guide_profiles?.display_name || '',
     city: tour.city || '',
     type: tour.type || '',
-    thumbnail: images[0]?.image_path || '',
-    gallery: images.map((image) => image.image_path),
+    mainImagePath: images[0]?.image_path || '',
+    thumbnail: resolvePublicStorageImageUrl('tour-images', images[0]?.image_path || ''),
+    gallery: images.map((image) => resolvePublicStorageImageUrl('tour-images', image.image_path)),
     hasImage: Boolean(images[0]?.image_path),
     createdAt: tour.created_at || '',
     bookings: tour.reservations?.length ?? 0,

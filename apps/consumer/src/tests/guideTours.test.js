@@ -4,10 +4,12 @@ import {
   buildTourChangeRequestRow,
   buildTourFormPayloadFromTour,
   buildTourRow,
+  createTourMainPhotoStoragePath,
   filterGuideToursByStatus,
   fetchGuideTours,
   getGuideTourStatusLabel,
   mapGuideTourListItem,
+  publishGuideTour,
   submitTourChangeRequest
 } from '../lib/guideTours.js';
 
@@ -22,7 +24,8 @@ test('buildTourRow maps an approved guide tour form to the existing tours schema
       hourlyPrice: '25',
       currency: 'USD',
       durationMinutes: '90',
-      maxPeople: '4'
+      maxPeople: '4',
+      mainImagePath: 'user-1/main-photo/main-1-cover.jpg'
     },
     { guideProfileId: '20000000-0000-4000-8000-000000000001' }
   );
@@ -40,8 +43,26 @@ test('buildTourRow maps an approved guide tour form to the existing tours schema
     duration_minutes: 90,
     max_people: 4,
     options: {},
+    main_image_path: 'user-1/main-photo/main-1-cover.jpg',
     status: 'pending'
   });
+});
+
+test('buildTourRow requires a main tour photo', () => {
+  assert.throws(() => buildTourRow(
+    {
+      city: 'Seoul',
+      title: 'Market walk',
+      type: 'Food',
+      description: 'A local market walk.',
+      paymentType: 'pay_as_you_go',
+      hourlyPrice: '25',
+      currency: 'USD',
+      durationMinutes: '90',
+      maxPeople: '4'
+    },
+    { guideProfileId: '20000000-0000-4000-8000-000000000001' }
+  ), /main photo/i);
 });
 
 test('buildTourChangeRequestRow stores editable tour fields in the change request payload', () => {
@@ -58,6 +79,7 @@ test('buildTourChangeRequestRow stores editable tour fields in the change reques
       currency: 'KRW',
       durationMinutes: '120',
       maxPeople: '6',
+      mainImagePath: 'user-1/main-photo/main-1-coast.jpg',
       option_pickup: 'yes',
       option_pickup_price: '10000'
     }
@@ -76,6 +98,7 @@ test('buildTourChangeRequestRow stores editable tour fields in the change reques
       payment_type: 'package',
       duration_minutes: 120,
       max_people: 6,
+      main_image_path: 'user-1/main-photo/main-1-coast.jpg',
       options: {
         pickup: true,
         pickup_price: 10000
@@ -101,7 +124,11 @@ test('buildTourFormPayloadFromTour converts a stored tour into edit form default
       pickup: true,
       pickup_price: 5,
       petFriendly: false
-    }
+    },
+    tour_images: [
+      { image_path: 'second.png', sort_order: 2 },
+      { image_path: 'first.png', sort_order: 1 }
+    ]
   }), {
     id: 'edit-tour-1',
     sourceTourId: 'tour-1',
@@ -117,9 +144,70 @@ test('buildTourFormPayloadFromTour converts a stored tour into edit form default
     currency: 'USD',
     durationMinutes: '90',
     maxPeople: '4',
+    mainImagePath: 'first.png',
+    mainImagePreview: 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/first.png',
     option_pickup: 'yes',
     option_pickup_price: '5'
   });
+});
+
+test('createTourMainPhotoStoragePath stores one main photo under the user folder', () => {
+  assert.equal(
+    createTourMainPhotoStoragePath({ userId: 'user-1', fileName: 'cover photo.png', now: 123 }),
+    'user-1/main-photo/main-123-cover-photo.png'
+  );
+});
+
+test('publishGuideTour inserts the main photo into tour_images after creating a tour', async () => {
+  const calls = [];
+  const fakeClient = {
+    from: (table) => {
+      if (table === 'tours') {
+        return {
+          insert: (row) => {
+            calls.push(['insert', table, row]);
+            return {
+              select: () => ({
+                single: async () => ({ data: { id: 'tour-1', ...row }, error: null })
+              })
+            };
+          }
+        };
+      }
+      if (table === 'tour_images') {
+        return {
+          insert: async (row) => {
+            calls.push(['insert', table, row]);
+            return { data: [row], error: null };
+          }
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    }
+  };
+
+  const result = await publishGuideTour(fakeClient, {
+    guideProfileId: 'guide-1',
+    payload: {
+      city: 'Seoul',
+      title: 'Market walk',
+      type: 'Food',
+      description: 'A local market walk.',
+      paymentType: 'pay_as_you_go',
+      hourlyPrice: '25',
+      currency: 'USD',
+      durationMinutes: '90',
+      maxPeople: '4',
+      mainImagePath: 'user-1/main-photo/main-1-cover.jpg'
+    }
+  });
+
+  assert.equal(result.id, 'tour-1');
+  assert.deepEqual(calls.at(-1), ['insert', 'tour_images', {
+    tour_id: 'tour-1',
+    image_path: 'user-1/main-photo/main-1-cover.jpg',
+    sort_order: 0
+  }]);
 });
 
 test('fetchGuideTours loads a guide tour list with pending change requests', async () => {
@@ -287,7 +375,8 @@ test('submitTourChangeRequest calls the RPC with a normalized edit payload', asy
       hourlyPrice: '30',
       currency: 'USD',
       durationMinutes: '75',
-      maxPeople: '3'
+      maxPeople: '3',
+      mainImagePath: 'user-1/main-photo/main-1-updated.jpg'
     }
   });
 
@@ -295,4 +384,5 @@ test('submitTourChangeRequest calls the RPC with a normalized edit payload', asy
   assert.equal(calls[0][0], 'submit_tour_change_request');
   assert.equal(calls[0][1].p_tour_id, 'tour-1');
   assert.equal(calls[0][1].p_payload.price_amount, 30);
+  assert.equal(calls[0][1].p_payload.main_image_path, 'user-1/main-photo/main-1-updated.jpg');
 });

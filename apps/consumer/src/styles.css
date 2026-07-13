@@ -2735,6 +2735,89 @@
     font-weight: 750;
   }
 
+  .tour-main-photo-uploader {
+    display: grid;
+    grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .tour-main-photo-preview {
+    aspect-ratio: 4 / 3;
+    width: 100%;
+    overflow: hidden;
+    border: 1px dashed rgb(212 212 216);
+    border-radius: 8px;
+    background: #f4f4f5;
+    color: #a1a1aa;
+    cursor: pointer;
+  }
+
+  .tour-main-photo-preview:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  .tour-main-photo-preview img {
+    display: block;
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+
+  .tour-main-photo-preview span {
+    display: grid;
+    height: 100%;
+    place-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 950;
+  }
+
+  .tour-main-photo-copy {
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .tour-main-photo-copy b {
+    color: #18181b;
+    font-size: 18px;
+    font-weight: 950;
+  }
+
+  .tour-main-photo-copy p {
+    max-width: 520px;
+    color: #71717a;
+    font-size: 14px;
+    font-weight: 750;
+    line-height: 1.45;
+  }
+
+  .tour-main-photo-action {
+    display: inline-flex;
+    height: 42px;
+    align-items: center;
+    gap: 8px;
+    border-radius: 8px;
+    background: #18181b;
+    padding: 0 14px;
+    color: white;
+    font-size: 13px;
+    font-weight: 950;
+  }
+
+  .tour-main-photo-action:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+
+  .tour-main-photo-uploader input[type="file"] {
+    display: none;
+  }
+
   .tour-form-section {
     display: grid;
     gap: 18px;
@@ -3904,6 +3987,10 @@
     }
 
     .guide-date-picker {
+      grid-template-columns: 1fr;
+    }
+
+    .tour-main-photo-uploader {
       grid-template-columns: 1fr;
     }
 

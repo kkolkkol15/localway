@@ -11,12 +11,12 @@ import { validateGuideProfilePhoto } from '../lib/guidePhoto.js';
 import { expandDateRange, getCalendarUnavailableSelection, saveGuideUnavailableDates } from '../lib/guideAvailability.js';
 import { getGuideModeOverview } from '../lib/guideMode.js';
 import { saveGuideTourDraft } from '../lib/guideTourDrafts.js';
-import { buildTourFormPayloadFromTour, fetchGuideTours, filterGuideToursByStatus, guideTourStatusFilters, mapGuideTourListItem, publishGuideTour, submitTourChangeRequest } from '../lib/guideTours.js';
+import { buildTourFormPayloadFromTour, fetchGuideTours, filterGuideToursByStatus, guideTourStatusFilters, mapGuideTourListItem, publishGuideTour, submitTourChangeRequest, uploadTourMainPhoto } from '../lib/guideTours.js';
 import { submitGuideApplication } from '../lib/guideApplications.js';
 import { buildHomepageTourSections, buildTourDetailPath, buildTourItinerarySteps, createSupportTicket, DEFAULT_SEARCH_FILTERS, fetchAccountSettings, fetchActiveTours, fetchBookmarks, fetchConversations, fetchSupportTickets, fetchTourById, filterSearchTours, getPaginatedSearchResults, getSearchFilterOptions, sendConversationMessage, sortSearchTours, toggleBookmark, updateGuideProfile, updateMemberProfile, upsertAccountSettings } from '../lib/customerApi.js';
 import { agreementSections, buildGuideInfoDetails, clampHourlyPrice, formatHourlyPrice, getPricingMode, hourlyPriceRange, majorCurrencyOptions, pricingModes, tourOptionGroups } from '../lib/tourCreateForm.js';
 import { buildSignupDisplayName, createBrowserSupabaseClient, fetchActiveGuideProfile, fetchOwnedGuideProfile, getAuthErrorMessage, getSupabaseConfig, resolveAvatarUrl, resolveGuideProfileImageUrl, signInWithEmail, signUpWithEmail, uploadPublicAvatar } from '../lib/supabaseAuth.js';
-import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
+import { createEmptyRichContentBlock, createInitialRichContentBlocks, getVideoDuration, sanitizeTourContentHtml, selectAllowedRichContentImageFiles, serializeRichContentBlocks, uploadTourContentImage, uploadTourContentVideo, validateVideoDuration } from '../lib/richContent.js';
 
 const today = new Date().toISOString().slice(0, 10);
 const SEARCH_RESULTS_PAGE_SIZE = 12;
@@ -2512,8 +2512,14 @@ function RichContentEditor({ blocks, onChange, onUploadImage, onUploadVideo, onN
   };
 
   const addMediaBlocks = async (files, type) => {
-    const fileList = [...(files ?? [])];
+    let fileList = [...(files ?? [])];
     if (!fileList.length) return;
+    if (type === 'image') {
+      const selected = selectAllowedRichContentImageFiles(fileList, blocks);
+      fileList = selected.allowedFiles;
+      if (selected.rejectedCount) onNotify('사진은 최대 6장까지 추가할 수 있어요.');
+      if (!fileList.length) return;
+    }
     setUploading(true);
     try {
       const mediaBlocks = [];
@@ -2650,6 +2656,9 @@ export function TourCreatePage() {
   const [pricingMode, setPricingMode] = useState(formSource?.paymentType ?? 'pay_as_you_go');
   const [hourlyPrice, setHourlyPrice] = useState(formSource?.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
   const [editorBlocks, setEditorBlocks] = useState(() => createInitialRichContentBlocks(formSource?.contentHtml ?? ''));
+  const [mainPhotoPath, setMainPhotoPath] = useState(formSource?.mainImagePath ?? '');
+  const [mainPhotoPreview, setMainPhotoPreview] = useState(formSource?.mainImagePreview ?? '');
+  const [mainPhotoUploading, setMainPhotoUploading] = useState(false);
   const editorHtml = useMemo(() => serializeRichContentBlocks(editorBlocks), [editorBlocks]);
   const [draftNotice, setDraftNotice] = useState('');
   const [draftBusy, setDraftBusy] = useState(false);
@@ -2694,11 +2703,17 @@ export function TourCreatePage() {
     setPricingMode(formSource.paymentType ?? 'pay_as_you_go');
     setHourlyPrice(formSource.hourlyPrice ? clampHourlyPrice(formSource.hourlyPrice) : hourlyPriceRange.defaultValue);
     setEditorBlocks(createInitialRichContentBlocks(formSource.contentHtml ?? ''));
+    setMainPhotoPath(formSource.mainImagePath ?? '');
+    setMainPhotoPreview(formSource.mainImagePreview ?? '');
     autoSaveSkipRef.current = true;
   }, [formSource?.id]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!mainPhotoPath) {
+      setDraftNotice('Please upload a main photo before submitting.');
+      return;
+    }
     const payload = buildTourDraftPayload(event.currentTarget, { agreements: agree, contentHtml: editorHtml, draftId });
     setPublishBusy(true);
     setDraftNotice('');
@@ -2772,6 +2787,29 @@ export function TourCreatePage() {
     }
     const client = await createBrowserSupabaseClient();
     return uploadTourContentVideo(client, state.auth.user?.id, file);
+  };
+  const uploadMainPhoto = async (file) => {
+    setMainPhotoUploading(true);
+    setDraftNotice('');
+    try {
+      validateGuideProfilePhoto(file);
+      if (!getSupabaseConfig().isConfigured) {
+        const url = URL.createObjectURL(file);
+        setMainPhotoPath(url);
+        setMainPhotoPreview(url);
+        return;
+      }
+      const client = await createBrowserSupabaseClient();
+      const uploaded = await uploadTourMainPhoto(client, state.auth.user?.id, file);
+      setMainPhotoPath(uploaded.path);
+      setMainPhotoPreview(uploaded.url);
+    } catch (error) {
+      const message = getAuthErrorMessage(error);
+      setDraftNotice(message);
+      dispatch({ type: 'SHOW_TOAST', payload: { message } });
+    } finally {
+      setMainPhotoUploading(false);
+    }
   };
 
   useEffect(() => {
@@ -2874,6 +2912,19 @@ export function TourCreatePage() {
         <section className="tour-form-section">
           <div className="tour-section-title">
             <span>02</span>
+            <h2>Main photo</h2>
+          </div>
+          <MainPhotoUploader
+            preview={mainPhotoPreview}
+            uploading={mainPhotoUploading}
+            onFileSelect={uploadMainPhoto}
+          />
+          <input type="hidden" name="mainImagePath" value={mainPhotoPath} />
+        </section>
+
+        <section className="tour-form-section">
+          <div className="tour-section-title">
+            <span>03</span>
             <h2>Product basics</h2>
           </div>
           <div className="tour-basic-grid">
@@ -2888,7 +2939,7 @@ export function TourCreatePage() {
 
         <section className="tour-form-section">
           <div className="tour-section-title">
-            <span>03</span>
+            <span>04</span>
             <h2>Tour content</h2>
           </div>
           <RichContentEditor
@@ -2903,7 +2954,7 @@ export function TourCreatePage() {
 
         <section className="tour-form-section">
           <div className="tour-section-title">
-            <span>04</span>
+            <span>05</span>
             <h2>Options</h2>
           </div>
           <div className="tour-option-grid">
@@ -2922,7 +2973,7 @@ export function TourCreatePage() {
 
         <section className="tour-form-section">
           <div className="tour-section-title">
-            <span>05</span>
+            <span>06</span>
             <h2>Terms placeholders</h2>
           </div>
           <div className="agreement-stack">
@@ -2951,10 +3002,59 @@ export function TourCreatePage() {
         <div className="tour-create-actions">
           {draftNotice && <p className="tour-draft-notice">{draftNotice}</p>}
           {!isEditMode && <button type="button" className="tour-secondary-action" onClick={(event) => saveTourDraft(event.currentTarget.form)} disabled={draftBusy}>{draftBusy ? 'Saving...' : 'Save draft'}</button>}
-          <button className="tour-primary-action" disabled={!agree.every(Boolean) || publishBusy}>{publishBusy ? 'Submitting...' : isEditMode ? 'Submit for review' : 'Publish'}</button>
+          <button className="tour-primary-action" disabled={!agree.every(Boolean) || !mainPhotoPath || mainPhotoUploading || publishBusy}>{publishBusy ? 'Submitting...' : isEditMode ? 'Submit for review' : 'Publish'}</button>
         </div>
       </form>
     </main>
+  );
+}
+
+function MainPhotoUploader({ preview = '', uploading = false, onFileSelect }) {
+  const inputRef = useRef(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [preview]);
+
+  const handleFile = (file) => {
+    if (!file || uploading) return;
+    onFileSelect?.(file);
+  };
+
+  return (
+    <div className={`tour-main-photo-uploader ${preview ? 'has-image' : ''} ${uploading ? 'busy' : ''}`}>
+      <button
+        className="tour-main-photo-preview"
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          handleFile(event.dataTransfer.files?.[0]);
+        }}
+        disabled={uploading}
+      >
+        {preview && !failed ? (
+          <img src={preview} alt="" onError={() => setFailed(true)} />
+        ) : (
+          <span><ImagePlus size={26} /> No image</span>
+        )}
+      </button>
+      <div className="tour-main-photo-copy">
+        <b>{uploading ? 'Uploading main photo...' : 'Upload one main photo'}</b>
+        <p>This image appears on tour cards, My Tours, and the admin tour list.</p>
+        <button className="tour-main-photo-action" type="button" onClick={() => inputRef.current?.click()} disabled={uploading}>
+          <Upload size={16} /> {preview ? 'Replace photo' : 'Choose photo'}
+        </button>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        onChange={(event) => handleFile(event.target.files?.[0])}
+      />
+    </div>
   );
 }
 

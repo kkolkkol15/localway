@@ -4,6 +4,7 @@ import {
   createInitialRichContentBlocks,
   createTourContentStoragePath,
   sanitizeTourContentHtml,
+  selectAllowedRichContentImageFiles,
   serializeRichContentBlocks,
   uploadTourContentImage,
   uploadTourContentVideo,
@@ -83,4 +84,33 @@ test('createTourContentStoragePath sanitizes file names', () => {
     createTourContentStoragePath({ userId: 'user-1', prefix: 'image', fileName: '서울 night #1.png', now: 123 }),
     /^user-1\/rich-content\/image-123-night-1\.png$/
   );
+});
+
+test('selectAllowedRichContentImageFiles rejects new images when the content already has 6 images', () => {
+  const blocks = Array.from({ length: 6 }, (_, index) => ({ id: `image-${index}`, type: 'image' }));
+  const result = selectAllowedRichContentImageFiles([{ name: 'extra.jpg', type: 'image/jpeg' }], blocks);
+
+  assert.deepEqual(result.allowedFiles, []);
+  assert.equal(result.rejectedCount, 1);
+});
+
+test('selectAllowedRichContentImageFiles only allows remaining image slots', () => {
+  const blocks = Array.from({ length: 4 }, (_, index) => ({ id: `image-${index}`, type: 'image' }));
+  const files = Array.from({ length: 5 }, (_, index) => ({ name: `photo-${index}.jpg`, type: 'image/jpeg' }));
+  const result = selectAllowedRichContentImageFiles(files, blocks);
+
+  assert.deepEqual(result.allowedFiles, files.slice(0, 2));
+  assert.equal(result.rejectedCount, 3);
+});
+
+test('selectAllowedRichContentImageFiles does not count videos toward the image limit', () => {
+  const blocks = [
+    ...Array.from({ length: 5 }, (_, index) => ({ id: `image-${index}`, type: 'image' })),
+    { id: 'video-1', type: 'video' }
+  ];
+  const files = [{ name: 'last-photo.jpg', type: 'image/jpeg' }, { name: 'too-many.jpg', type: 'image/jpeg' }];
+  const result = selectAllowedRichContentImageFiles(files, blocks);
+
+  assert.deepEqual(result.allowedFiles, files.slice(0, 1));
+  assert.equal(result.rejectedCount, 1);
 });

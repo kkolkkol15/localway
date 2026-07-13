@@ -701,6 +701,16 @@ function TourChangeRequestPanel({ tour, request }) {
           <p>{request.requested.detailText || '-'}</p>
         </div>
       </div>
+      <div className="tour-change-images">
+        <div>
+          <b>현재 대표 사진</b>
+          {tour.thumbnail ? <img src={tour.thumbnail} alt="현재 대표 사진" /> : <span>이미지 없음</span>}
+        </div>
+        <div>
+          <b>요청 대표 사진</b>
+          {request.requested.mainImageUrl ? <img src={request.requested.mainImageUrl} alt="요청 대표 사진" /> : <span>이미지 없음</span>}
+        </div>
+      </div>
     </section>
   );
 }

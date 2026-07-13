@@ -1,6 +1,7 @@
 import { resolvePublicStorageUrl } from './supabaseAuth.js';
 
 const RICH_CONTENT_VIDEO_MAX_SECONDS = 30;
+export const RICH_CONTENT_IMAGE_MAX_COUNT = 6;
 const allowedTags = new Set(['P', 'H2', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'TABLE', 'TBODY', 'TR', 'TD', 'IMG', 'VIDEO', 'SOURCE', 'BR']);
 const allowedAttributes = {
   IMG: new Set(['src', 'alt', 'loading']),
@@ -136,6 +137,17 @@ export function serializeRichContentBlocks(blocks = []) {
     if (block.type === 'video') return renderVideoBlock(block);
     return '';
   }).filter(Boolean).join('');
+}
+
+export function selectAllowedRichContentImageFiles(files = [], blocks = [], maxImageCount = RICH_CONTENT_IMAGE_MAX_COUNT) {
+  const fileList = [...(files ?? [])];
+  const currentImageCount = blocks.filter((block) => block.type === 'image').length;
+  const remainingSlots = Math.max(0, Number(maxImageCount) - currentImageCount);
+  const allowedFiles = fileList.slice(0, remainingSlots);
+  return {
+    allowedFiles,
+    rejectedCount: Math.max(0, fileList.length - allowedFiles.length)
+  };
 }
 
 function sanitizeAttribute(tagName, attribute) {

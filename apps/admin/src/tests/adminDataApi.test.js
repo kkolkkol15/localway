@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildAdminConversationRow,
@@ -25,6 +25,13 @@ import {
   updateTourStatus
 } from '../lib/adminDataApi.js';
 import { createSupabaseRestClient } from '../lib/guideApplicationsApi.js';
+
+function readMigrationByName(name) {
+  const migrationsDir = resolve(process.cwd(), '../../supabase/migrations');
+  const fileName = readdirSync(migrationsDir).find((file) => file.endsWith(`${name}.sql`));
+  assert.ok(fileName, `Expected migration ${name} to exist`);
+  return readFileSync(resolve(migrationsDir, fileName), 'utf8');
+}
 
 test('buildAdminConversationRow creates a reusable admin member conversation', () => {
   assert.deepEqual(buildAdminConversationRow({
@@ -595,7 +602,7 @@ test('mapTourToAdminRow preserves detailed tour fields for the admin detail moda
     reservations: [{ id: 'reservation-1' }, { id: 'reservation-2' }]
   });
 
-  assert.equal(row.thumbnail, 'first.jpg');
+  assert.equal(row.thumbnail, 'https://qrabzkcibqaslealvdar.supabase.co/storage/v1/object/public/tour-images/first.jpg');
   assert.equal(row.detailText, '자전거를 타고 반석천을 탐방합니다.');
   assert.equal(row.priceLabel, 'KRW 60,000');
   assert.equal(row.durationLabel, '2시간');
@@ -646,6 +653,7 @@ test('mapTourToAdminRow exposes pending change request details for admin review'
         payment_type: 'package',
         duration_minutes: 120,
         max_people: 5,
+        main_image_path: 'user-1/main-photo/main-1-updated.jpg',
         options: { pickup: true }
       }
     }]
@@ -655,6 +663,7 @@ test('mapTourToAdminRow exposes pending change request details for admin review'
   assert.equal(row.pendingChangeRequest.id, 'request-1');
   assert.equal(row.pendingChangeRequest.requested.title, 'Updated title');
   assert.equal(row.pendingChangeRequest.requested.priceLabel, 'KRW 70,000');
+  assert.equal(row.pendingChangeRequest.requested.mainImagePath, 'user-1/main-photo/main-1-updated.jpg');
 });
 
 test('fetchAdminTours still returns tours when change request table is unavailable', async () => {
@@ -705,6 +714,7 @@ test('mapTourChangeRequestToAdminRow normalizes requested tour payload values', 
       payment_type: 'package',
       duration_minutes: 120,
       max_people: 5,
+      main_image_path: 'user-1/main-photo/main-1-updated.jpg',
       options: { pickup: true }
     }
   });
@@ -712,6 +722,7 @@ test('mapTourChangeRequestToAdminRow normalizes requested tour payload values', 
   assert.equal(row.id, 'request-2');
   assert.equal(row.requested.title, 'Updated title');
   assert.equal(row.requested.durationLabel, '2시간');
+  assert.equal(row.requested.mainImagePath, 'user-1/main-photo/main-1-updated.jpg');
   assert.deepEqual(row.requested.optionLabels, ['pickup']);
 });
 
@@ -742,12 +753,24 @@ test('reviewTourChangeRequest calls the admin review RPC', async () => {
 });
 
 test('review_tour_change_request rejection restores the original tour to active', () => {
-  const migrationSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260712010000_restore_tour_on_change_rejection.sql'), 'utf8');
+  const migrationSql = readMigrationByName('restore_tour_on_change_rejection');
   const rejectionBranch = migrationSql.match(/elsif p_decision = 'rejected' then([\s\S]*?)else/);
 
   assert.ok(rejectionBranch, 'rejected decision branch should exist');
   assert.match(rejectionBranch[1], /update public\.tours[\s\S]*set status = 'active'[\s\S]*where id = v_request\.tour_id;/);
   assert.doesNotMatch(rejectionBranch[1], /update public\.tours[\s\S]*set status = 'rejected'[\s\S]*where id = v_request\.tour_id;/);
+});
+
+test('review_tour_change_request approval replaces the stored main tour image only on approval', () => {
+  const migrationSql = readMigrationByName('apply_tour_main_photo_changes');
+  const approvalBranch = migrationSql.match(/if p_decision = 'approved' then([\s\S]*?)update public\.tour_change_requests/);
+  const rejectionBranch = migrationSql.match(/elsif p_decision = 'rejected' then([\s\S]*?)update public\.tour_change_requests/);
+
+  assert.ok(approvalBranch, 'approved decision branch should exist');
+  assert.match(approvalBranch[1], /delete from public\.tour_images[\s\S]*where tour_id = v_request\.tour_id;/);
+  assert.match(approvalBranch[1], /insert into public\.tour_images \(tour_id, image_path, sort_order\)/);
+  assert.ok(rejectionBranch, 'rejected decision branch should exist');
+  assert.doesNotMatch(rejectionBranch[1], /tour_images/);
 });
 
 test('updateTourStatus patches an existing tour status', async () => {
