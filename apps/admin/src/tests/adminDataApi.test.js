@@ -708,22 +708,27 @@ test('mapTourChangeRequestToAdminRow normalizes requested tour payload values', 
       title: 'Updated title',
       city: 'Busan',
       type: 'Nature',
-      description: 'Updated description',
+      description: 'Updated description\nSecond paragraph',
+      content_html: '<p>Detailed update</p><p>Second detail</p>',
       price_amount: 70000,
       currency: 'KRW',
       payment_type: 'package',
       duration_minutes: 120,
       max_people: 5,
       main_image_path: 'user-1/main-photo/main-1-updated.jpg',
-      options: { pickup: true }
+      options: { pickup: true },
+      transport: ['도보', '지하철']
     }
   });
 
   assert.equal(row.id, 'request-2');
   assert.equal(row.requested.title, 'Updated title');
+  assert.equal(row.requested.descriptionText, 'Updated description\nSecond paragraph');
+  assert.equal(row.requested.detailText, 'Detailed update Second detail');
   assert.equal(row.requested.durationLabel, '2시간');
   assert.equal(row.requested.mainImagePath, 'user-1/main-photo/main-1-updated.jpg');
   assert.deepEqual(row.requested.optionLabels, ['pickup']);
+  assert.deepEqual(row.requested.transportLabels, ['도보', '지하철']);
 });
 
 test('reviewTourChangeRequest calls the admin review RPC', async () => {

@@ -15,6 +15,17 @@ function compactText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function preserveLineBreakText(value) {
+  return String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function isRenderableImageUrl(value = '') {
   return /^(https?:|data:|blob:)/i.test(String(value));
 }
@@ -219,13 +230,15 @@ function buildActivitySummary(profile = {}) {
 
 function mapRequestedTourPayload(payload = {}) {
   const mainImagePath = payload.main_image_path || '';
+  const descriptionText = preserveLineBreakText(payload.description);
   return {
     title: payload.title || '',
     city: payload.city || '',
     type: payload.type || '',
     description: compactText(payload.description),
+    descriptionText,
     contentHtml: payload.content_html || '',
-    detailText: htmlToText(payload.content_html) || compactText(payload.description) || '상세 설명이 없습니다.',
+    detailText: htmlToText(payload.content_html) || compactText(descriptionText) || '상세 설명이 없습니다.',
     priceAmount: payload.price_amount ?? 0,
     currency: payload.currency || 'USD',
     priceLabel: formatPrice(payload.currency, payload.price_amount),
@@ -362,7 +375,8 @@ export function mapTourToAdminRow(tour = {}) {
     .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
   const optionLabels = normalizeList(tour.options);
   const transportLabels = normalizeList(tour.transport);
-  const detailText = htmlToText(tour.content_html) || compactText(tour.description) || '상세 설명이 없습니다.';
+  const descriptionText = preserveLineBreakText(tour.description);
+  const detailText = htmlToText(tour.content_html) || compactText(descriptionText) || '상세 설명이 없습니다.';
   const priceLabel = formatPrice(tour.currency, tour.price_amount);
   const pendingChangeRequest = (tour.tour_change_requests ?? [])
     .filter((request) => request?.status === 'pending')
@@ -383,6 +397,7 @@ export function mapTourToAdminRow(tour = {}) {
     bookings: tour.reservations?.length ?? 0,
     status: tour.status || '',
     description: compactText(tour.description),
+    descriptionText,
     contentHtml: tour.content_html || '',
     detailText,
     priceAmount: tour.price_amount ?? 0,

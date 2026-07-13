@@ -302,6 +302,24 @@ test('mapTourRecord computes tour ratings from visible review rows', () => {
   });
 });
 
+test('mapTourRecord computes list ratings from review rows without review content', () => {
+  const tour = mapTourRecord({
+    id: 'tour-list-review-1',
+    title: 'List review tour',
+    city: 'Seoul',
+    guide_profiles: { display_name: 'Guide' },
+    reviews: [
+      { id: 'review-1', rating: 5, status: 'visible' },
+      { id: 'review-2', rating: 4, status: 'visible' },
+      { id: 'review-hidden', rating: 1, status: 'hidden' }
+    ]
+  });
+
+  assert.equal(tour.rating, 4.5);
+  assert.equal(tour.reviews, 2);
+  assert.deepEqual(tour.reviewsList, []);
+});
+
 test('mapTourRecord falls back cleanly when a tour has no reviews', () => {
   const tour = mapTourRecord({
     id: 'tour-empty-reviews',
@@ -440,7 +458,7 @@ test('fetchActiveTours selects active tours from active guide profiles only', as
 
   assert.deepEqual(calls, [
     ['from', 'tours'],
-    ['select', '*, guide_profiles!inner(*, profiles(avatar_path)), tour_images(*), reviews(id, rating, content, created_at, status, profiles(display_name, avatar_path))'],
+    ['select', 'id,title,city,type,description,price_amount,currency,payment_type,duration_minutes,max_people,status,created_at,options,guide_profiles!inner(id,display_name,city,languages,intro,residence_years,status,profiles(avatar_path)),tour_images(id,image_path,sort_order),reviews(id,rating,status)'],
     ['eq', 'status', 'active'],
     ['eq', 'guide_profiles.status', 'active'],
     ['order', 'created_at', { ascending: false }]

@@ -27,7 +27,7 @@ export function TourCard({ tour, onClick, saved, onSave }) {
   const ratingLabel = Number(tour.reviews ?? 0) > 0 && Number(tour.rating ?? 0) > 0 ? `⭐ ${tour.rating}` : '신규';
 
   return (
-    <article className="group relative min-w-[280px] overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
+    <article className="group relative w-full min-w-0 overflow-hidden rounded-card bg-cream shadow-soft transition hover:-translate-y-1">
       {onSave && (
         <button
           className="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-primary shadow-soft backdrop-blur transition hover:scale-105"
