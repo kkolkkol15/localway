@@ -25,6 +25,10 @@ function compactText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function preserveLineBreakText(value = '') {
+  return String(value || '').replace(/\r\n?/g, '\n').trim();
+}
+
 function htmlToText(value = '') {
   return compactText(String(value || '').replace(/<[^>]*>/g, ' '));
 }
@@ -72,31 +76,6 @@ export function resolvePublicStorageImageUrl(bucket, storagePath = '', supabaseU
   if (!path || isRenderableImageUrl(path)) return path;
   const objectPath = path.startsWith(`${bucket}/`) ? path.slice(bucket.length + 1) : path;
   return `${String(supabaseUrl).replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${encodeStoragePath(objectPath)}`;
-}
-
-export function buildTourItinerarySteps(tour = {}) {
-  const city = tour.city || 'the city';
-  const detailSentences = compactText(tour.detailText || tour.description)
-    .split(/(?<=[.!?。！？])\s+/)
-    .map(compactText)
-    .filter(Boolean);
-  const flow = detailSentences.slice(0, 2).join(' ') || 'Meet your guide and explore the local highlights selected for this tour.';
-  const transport = (tour.transportLabels ?? []).length ? ` Main transport: ${tour.transportLabels.join(', ')}.` : '';
-  const duration = tour.durationLabel && tour.durationLabel !== '시간 미정' ? ` Planned duration: ${tour.durationLabel}.` : '';
-  return [
-    {
-      title: `Meet in ${city}`,
-      description: `Start with your local guide in ${city} and confirm the route before the experience begins.`
-    },
-    {
-      title: 'Experience flow',
-      description: `${flow}${transport}`.trim()
-    },
-    {
-      title: 'Wrap up',
-      description: `Finish with final local tips and time for questions.${duration}`.trim()
-    }
-  ];
 }
 
 export function getPaginatedSearchResults(results = [], visibleCount = 12) {
@@ -237,7 +216,8 @@ export function mapTourRecord(record = {}) {
   const maxPeople = Number(record.max_people ?? 1);
   const optionLabels = normalizeList(record.options);
   const transportLabels = normalizeList(record.transport);
-  const detailText = htmlToText(record.content_html) || compactText(record.description) || '';
+  const descriptionText = preserveLineBreakText(record.description);
+  const detailText = htmlToText(record.content_html) || compactText(descriptionText) || '';
   const price = Number(record.price_amount ?? 0);
   const reviewsList = (record.reviews ?? [])
     .filter((review) => !review.status || review.status === 'visible')
@@ -250,7 +230,8 @@ export function mapTourRecord(record = {}) {
     title: record.title,
     city: record.city,
     type: record.type,
-    description: compactText(record.description),
+    description: compactText(descriptionText),
+    descriptionText,
     contentHtml: record.content_html || '',
     detailText,
     price,

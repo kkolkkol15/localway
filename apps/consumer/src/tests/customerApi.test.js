@@ -9,7 +9,6 @@ import {
   buildSupportTicketRow,
   buildHomepageTourSections,
   buildTourDetailPath,
-  buildTourItinerarySteps,
   DEFAULT_SEARCH_FILTERS,
   fetchActiveTours,
   fetchBookmarkIds,
@@ -238,6 +237,20 @@ test('mapTourRecord prepares real tour detail fields for the detail page', () =>
   assert.equal(tour.guide.intro, 'I host small food walks.');
 });
 
+test('mapTourRecord preserves short description line breaks for the tour page', () => {
+  const tour = mapTourRecord({
+    id: 'tour-multiline-description',
+    title: 'Welcome route',
+    city: 'Seoul',
+    description: '1. Arrival & Warm Welcome\nMeet at the station.\n\n2. Market Walk\nExplore local shops.',
+    guide_profiles: { display_name: 'Guide' },
+    tour_images: []
+  });
+
+  assert.equal(tour.descriptionText, '1. Arrival & Warm Welcome\nMeet at the station.\n\n2. Market Walk\nExplore local shops.');
+  assert.equal(tour.description, '1. Arrival & Warm Welcome Meet at the station. 2. Market Walk Explore local shops.');
+});
+
 test('mapTourRecord computes tour ratings from visible review rows', () => {
   const tour = mapTourRecord({
     id: 'tour-review-1',
@@ -305,19 +318,6 @@ test('mapTourRecord falls back cleanly when a tour has no reviews', () => {
   assert.equal(tour.rating, 0);
   assert.equal(tour.reviews, 0);
   assert.deepEqual(tour.reviewsList, []);
-});
-
-test('buildTourItinerarySteps creates course steps from existing tour data', () => {
-  const steps = buildTourItinerarySteps({
-    city: 'Seoul',
-    durationLabel: '2시간',
-    transportLabels: ['Walking'],
-    detailText: 'Meet at the station. Explore the market. Finish at a tea house.'
-  });
-
-  assert.deepEqual(steps.map((step) => step.title), ['Meet in Seoul', 'Experience flow', 'Wrap up']);
-  assert.match(steps[1].description, /Explore the market/);
-  assert.match(steps[2].description, /2시간/);
 });
 
 test('fetchTourById requests active tour detail data without mock fallback', async () => {
