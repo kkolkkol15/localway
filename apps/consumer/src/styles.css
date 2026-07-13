@@ -3968,6 +3968,7 @@
       overflow-y: hidden;
       margin-inline: -16px;
       padding: 4px 16px 18px;
+      min-height: 430px;
       scroll-padding-inline: 16px;
       scroll-snap-type: x mandatory;
       -webkit-overflow-scrolling: touch;
@@ -3979,15 +3980,19 @@
     }
 
     .popular-carousel-track {
+      display: flex;
       width: max-content;
       gap: 16px;
-      animation: none;
-      transform: none;
+      min-height: 400px;
+      animation: none !important;
+      transform: none !important;
       will-change: auto;
     }
 
     .popular-tour-slide {
+      display: block;
       flex: 0 0 min(82vw, 320px);
+      min-width: min(82vw, 320px);
       scroll-snap-align: start;
     }
 
