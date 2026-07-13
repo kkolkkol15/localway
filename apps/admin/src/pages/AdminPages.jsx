@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Ban, Check, Eye, Pause, Play, Plus, Send, Trash2 } from 'lucide-react';
 import { DataTable } from '../components/DataTable.jsx';
@@ -583,85 +583,123 @@ export function TourManagement() {
   );
 }
 
+function formatAdminDate(value, mode = 'date') {
+  if (!value) return '미입력';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '미입력';
+  return mode === 'datetime' ? date.toLocaleString('ko-KR') : date.toLocaleDateString('ko-KR');
+}
+
+function formatCompareValue(value, fallback = '미입력') {
+  if (Array.isArray(value)) return value.filter(Boolean).join(', ') || fallback;
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function hasDisplayValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).length > 0;
+  return String(value ?? '').trim().length > 0;
+}
+
+function compareDisplayValue(value) {
+  return Array.isArray(value) ? value.filter(Boolean).join('|') : String(value ?? '').trim();
+}
+
+function buildTourChangeRows(tour, requested) {
+  return [
+    { label: '투어명', current: tour.title, requested: requested.title },
+    { label: '도시', current: tour.city, requested: requested.city },
+    { label: '유형', current: tour.type, requested: requested.type },
+    { label: '가격', current: tour.priceLabel || tour.price, requested: requested.priceLabel },
+    { label: '결제 방식', current: tour.paymentTypeLabel, requested: requested.paymentTypeLabel },
+    { label: '소요 시간', current: tour.durationLabel, requested: requested.durationLabel },
+    { label: '최대 인원', current: tour.maxPeopleLabel, requested: requested.maxPeopleLabel },
+    { label: '옵션', current: tour.optionLabels, requested: requested.optionLabels },
+    { label: '이동수단', current: tour.transportLabels, requested: requested.transportLabels }
+  ].map((row) => {
+    const requestedProvided = hasDisplayValue(row.requested);
+    const currentValue = formatCompareValue(row.current, '미입력');
+    const requestedValue = requestedProvided ? formatCompareValue(row.requested, '미입력') : currentValue;
+    return {
+      ...row,
+      currentValue,
+      requestedValue,
+      changed: requestedProvided && compareDisplayValue(row.current) !== compareDisplayValue(row.requested)
+    };
+  });
+}
+
+function TourReadOnlyField({ label, value, emphasize = false }) {
+  return (
+    <div className={`tour-review-field${emphasize ? ' is-emphasized' : ''}`}>
+      <span>{label}</span>
+      <strong>{value || '미입력'}</strong>
+    </div>
+  );
+}
+
 function TourDetailModal({ tour, onClose }) {
-  const summaryRows = [
+  const heroRows = [
+    ['가이드', tour.guide || '미입력'],
     ['도시', tour.city || '미입력'],
     ['유형', tour.type || '미입력'],
-    ['가이드', tour.guide || '미입력'],
-    ['등록일', tour.createdAt ? new Date(tour.createdAt).toLocaleDateString('ko-KR') : '미입력']
+    ['등록일', formatAdminDate(tour.createdAt)]
   ];
   const metrics = [
     ['가격', tour.priceLabel || tour.price || '미입력'],
+    ['결제 방식', tour.paymentTypeLabel || '미입력'],
     ['소요 시간', tour.durationLabel || '미입력'],
     ['최대 인원', tour.maxPeopleLabel || '미입력'],
-    ['예약 건수', `${tour.bookings ?? 0}건`]
+    ['예약 수', `${tour.bookings ?? 0}건`]
   ];
-  const detailRows = [
-    ['결제 방식', tour.paymentTypeLabel || '미입력'],
-    ['통화', tour.currency || '미입력'],
-    ['상태', tour.status || '미입력']
-  ];
+  const descriptionText = tour.descriptionText || tour.detailText || tour.description || '상세 설명이 없습니다.';
 
   return (
     <Modal title="투어 상세" onClose={onClose} wide>
-      <div className="tour-detail-shell">
-        <section className="tour-detail-hero">
-          <div className="tour-detail-image-frame">
+      <div className="tour-review-shell">
+        <section className="tour-review-hero">
+          <div className="tour-review-image-frame">
             {tour.hasImage || tour.thumbnail ? <img src={tour.thumbnail} alt={tour.title || '투어 이미지'} /> : <div className="tour-detail-image-empty">이미지 없음</div>}
           </div>
-          <div className="tour-detail-header">
-            <div className="tour-detail-title-row">
+          <div className="tour-review-header">
+            <div className="tour-review-title-row">
+              <span className="tour-review-kicker">관리자 검수 폼</span>
               <h3>{tour.title || '제목 없는 투어'}</h3>
               <StatusBadge value={tour.status} />
             </div>
-            <dl className="tour-detail-summary">
-              {summaryRows.map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
+            <div className="tour-review-field-grid">
+              {heroRows.map(([label, value]) => <TourReadOnlyField key={label} label={label} value={value} />)}
+            </div>
           </div>
         </section>
 
-        <section className="tour-detail-metrics" aria-label="투어 핵심 지표">
+        <section className="tour-review-metrics" aria-label="투어 핵심 정보">
           {metrics.map(([label, value]) => (
-            <article key={label} className="tour-detail-metric">
+            <article key={label} className="tour-review-metric">
               <span>{label}</span>
               <strong>{value}</strong>
             </article>
           ))}
         </section>
 
-        <section className="tour-detail-body">
-          <article className="tour-detail-panel tour-detail-description">
-            <h4>설명</h4>
-            <p>{tour.detailText || tour.description || '상세 설명이 없습니다.'}</p>
+        <section className="tour-review-body">
+          <article className="tour-review-panel tour-review-description">
+            <h4>투어 소개 / 상세 설명</h4>
+            <p>{descriptionText}</p>
           </article>
-          <aside className="tour-detail-panel">
-            <h4>세부 정보</h4>
-            <dl className="tour-detail-info-list">
-              {detailRows.map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
+          <aside className="tour-review-panel">
+            <h4>옵션 / 이동수단</h4>
+            <div className="tour-review-chip-group">
+              <span>옵션</span>
+              <ChipList items={tour.optionLabels} emptyText="옵션 없음" />
+            </div>
+            <div className="tour-review-chip-group">
+              <span>이동수단</span>
+              <ChipList items={tour.transportLabels} emptyText="미입력" />
+            </div>
           </aside>
         </section>
 
-        <section className="tour-detail-panel tour-detail-extra">
-          <div>
-            <h4>옵션</h4>
-            <ChipList items={tour.optionLabels} emptyText="옵션 없음" />
-          </div>
-          <div>
-            <h4>이동수단</h4>
-            <ChipList items={tour.transportLabels} emptyText="미입력" />
-          </div>
-        </section>
         {tour.pendingChangeRequest && <TourChangeRequestPanel tour={tour} request={tour.pendingChangeRequest} />}
       </div>
     </Modal>
@@ -669,51 +707,53 @@ function TourDetailModal({ tour, onClose }) {
 }
 
 function TourChangeRequestPanel({ tour, request }) {
-  const rows = [
-    ['제목', tour.title, request.requested.title],
-    ['도시', tour.city, request.requested.city],
-    ['유형', tour.type, request.requested.type],
-    ['가격', tour.priceLabel, request.requested.priceLabel],
-    ['소요 시간', tour.durationLabel, request.requested.durationLabel],
-    ['최대 인원', tour.maxPeopleLabel, request.requested.maxPeopleLabel],
-    ['결제 방식', tour.paymentTypeLabel, request.requested.paymentTypeLabel]
-  ];
+  const rows = buildTourChangeRows(tour, request.requested);
+  const currentDescription = tour.descriptionText || tour.detailText || tour.description || '-';
+  const requestedDescription = request.requested.descriptionText || request.requested.detailText || currentDescription;
+  const descriptionChanged = hasDisplayValue(request.requested.descriptionText || request.requested.detailText)
+    && compareDisplayValue(currentDescription) !== compareDisplayValue(requestedDescription);
+  const imageChanged = hasDisplayValue(request.requested.mainImageUrl)
+    && compareDisplayValue(tour.thumbnail) !== compareDisplayValue(request.requested.mainImageUrl);
   return (
-    <section className="tour-detail-panel tour-change-panel">
+    <section className="tour-review-panel tour-change-panel">
       <div className="tour-change-heading">
-        <h4>수정 승인 요청</h4>
-        <span>{request.createdAt ? new Date(request.createdAt).toLocaleString('ko-KR') : '요청일 미입력'}</span>
+        <div>
+          <span className="tour-review-kicker">수정 신청 검수</span>
+          <h4>수정 전 / 수정 후 비교</h4>
+        </div>
+        <span>{formatAdminDate(request.createdAt, 'datetime')}</span>
       </div>
-      <div className="tour-change-table">
-        <b>항목</b>
-        <b>현재 값</b>
-        <b>요청 값</b>
-        {rows.map(([label, current, requested]) => (
-          <Fragment key={label}>
-            <span>{label}</span>
-            <span>{current || '-'}</span>
-            <strong>{requested || '-'}</strong>
-          </Fragment>
-        ))}
+
+      <div className="tour-change-comparison">
+        <div className="tour-change-column">
+          <b>수정 전</b>
+          {rows.map((row) => <TourReadOnlyField key={row.label} label={row.label} value={row.currentValue} />)}
+        </div>
+        <div className="tour-change-column is-requested">
+          <b>수정 후</b>
+          {rows.map((row) => <TourReadOnlyField key={row.label} label={row.label} value={row.requestedValue} emphasize={row.changed} />)}
+        </div>
       </div>
+
       <div className="tour-change-description">
-        <div>
-          <b>현재 설명</b>
-          <p>{tour.detailText || '-'}</p>
+        <div className="tour-change-text-card">
+          <b>수정 전 설명</b>
+          <p>{currentDescription}</p>
         </div>
-        <div>
-          <b>요청 설명</b>
-          <p>{request.requested.detailText || '-'}</p>
+        <div className={`tour-change-text-card${descriptionChanged ? ' is-changed' : ''}`}>
+          <b>수정 후 설명</b>
+          <p>{requestedDescription}</p>
         </div>
       </div>
+
       <div className="tour-change-images">
-        <div>
-          <b>현재 대표 사진</b>
+        <div className="tour-change-image-card">
+          <b>수정 전 대표 사진</b>
           {tour.thumbnail ? <img src={tour.thumbnail} alt="현재 대표 사진" /> : <span>이미지 없음</span>}
         </div>
-        <div>
-          <b>요청 대표 사진</b>
-          {request.requested.mainImageUrl ? <img src={request.requested.mainImageUrl} alt="요청 대표 사진" /> : <span>이미지 없음</span>}
+        <div className={`tour-change-image-card${imageChanged ? ' is-changed' : ''}`}>
+          <b>수정 후 대표 사진</b>
+          {request.requested.mainImageUrl ? <img src={request.requested.mainImageUrl} alt="요청 대표 사진" /> : (tour.thumbnail ? <img src={tour.thumbnail} alt="기존 대표 사진 유지" /> : <span>이미지 없음</span>)}
         </div>
       </div>
     </section>
