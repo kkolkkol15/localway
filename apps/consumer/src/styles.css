@@ -3963,12 +3963,36 @@
       border-radius: 28px 28px 0 0;
     }
 
-    .popular-tour-slide {
-      flex-basis: min(82vw, 320px);
+    .popular-carousel {
+      overflow-x: auto;
+      overflow-y: hidden;
+      margin-inline: -16px;
+      padding: 4px 16px 18px;
+      scroll-padding-inline: 16px;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .popular-carousel::before,
+    .popular-carousel::after {
+      display: none;
     }
 
     .popular-carousel-track {
-      animation-duration: 72s;
+      width: max-content;
+      gap: 16px;
+      animation: none;
+      transform: none;
+      will-change: auto;
+    }
+
+    .popular-tour-slide {
+      flex: 0 0 min(82vw, 320px);
+      scroll-snap-align: start;
+    }
+
+    .popular-tour-slide[aria-hidden="true"] {
+      display: none;
     }
 
     .tour-detail-page {
